@@ -9,3 +9,7 @@
 
 # Executables
 *.exe
+
+# Attempted things that didn't pan out
+hello_c.asm
+hello_wb.asm

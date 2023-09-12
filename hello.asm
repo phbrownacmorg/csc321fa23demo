@@ -1,4 +1,4 @@
- ; Console Message, 64 bit. V1.03
+; Console Message, 64 bit. V1.03
 NULL              EQU 0                         ; Constants
 STD_OUTPUT_HANDLE EQU -11
 
