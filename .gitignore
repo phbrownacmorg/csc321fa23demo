@@ -1,0 +1,11 @@
+# Backup files
+\#*
+*~
+*.bak
+
+# Object files
+*.obj
+*.o
+
+# Executables
+*.exe
