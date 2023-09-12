@@ -1,6 +1,6 @@
 ; Console Message, 64 bit. V1.03
-NULL              EQU 0                         ; Constants
-STD_OUTPUT_HANDLE EQU -11
+NULL              EQU 0                         ; Constants, to be expanded by the preprocessor
+STD_OUTPUT_HANDLE EQU -11                       ;   (no memory locations for these, just substituted into code)
 
 extern GetStdHandle                             ; Import external symbols
 extern WriteFile                                ; Windows API functions, not decorated
@@ -8,8 +8,8 @@ extern ExitProcess
 
 global Start                                    ; Export symbols. The entry point
 
-section .data                                   ; Initialized data segment
- Message        db "Hello, world!", 0Dh, 0Ah
+section .data                                   ; Initialized data segment, mostly used for constants
+ Message        db "Hello, world!", 0Dh, 0Ah    ;    These have memory locations.
  MessageLength  EQU $-Message                   ; Address of this line ($) - address of Message
 
 section .bss                                    ; Uninitialized data segment
