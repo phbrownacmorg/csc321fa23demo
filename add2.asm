@@ -3,6 +3,7 @@ NULL                EQU 0                       ; Constants, to be expanded by t
 STD_OUTPUT_HANDLE   EQU -11                     ;   (no memory locations for these, just substituted into code)
 STD_INPUT_HANDLE    EQU -10
 MAX_INPUT_LENGTH    EQU 10                      ; Nine digits and a sign
+ASCII_ZERO          EQU 48
 
 extern GetStdHandle                             ; Import external symbols
 extern ReadFile
@@ -12,6 +13,7 @@ extern ExitProcess
 global Start                                    ; Export symbols. The entry point
 
 section .data                                   ; Initialized data segment, mostly used for constants
+ ;Ten            dd 0000 000Ah
  Prompt1        db "Please enter an integer: ", 0Dh, 0Ah
  Prompt1Length  EQU $-Prompt1
  Prompt2        db "Please enter a second integer: ", 0Dh, 0Ah
@@ -71,6 +73,24 @@ Start:
  add   RSP, 48                                  ; Remove the 48 bytes
 
 ;; Convert the first integer string -> int
+ mov   EAX, 0
+ mov   R8, BytesRead
+ lea   RSI, [REL InputSpace]
+ mov    R10, 10
+ ;; while R8 > 0
+while_R8_gt_0:
+ test  R8, 0
+ jle   endwhile_R8_gt_0
+
+ mov   cl, [RSI]                                ; Move one digit into CL
+ sub   ECX, ASCII_ZERO                          ; Char to numeric
+ mul   R10D                                     ; EAX *= 10 (previous digits)
+ add   eax, ecx                                 ; Add in the current digit
+ dec   R8
+ inc   RSI
+
+ jmp   while_R8_gt_0
+endwhile_R8_gt_0:
 
 ;; Prompt for the second integer
  sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
