@@ -14,11 +14,11 @@ global Start                                    ; Export symbols. The entry poin
 
 section .data                                   ; Initialized data segment, mostly used for constants
  ;Ten            dd 0000 000Ah
- Prompt1        db "Please enter an integer: ", 0Dh, 0Ah
+ Prompt1        db "Please enter an integer: "
  Prompt1Length  EQU $-Prompt1
- Prompt2        db "Please enter a second integer: ", 0Dh, 0Ah
+ Prompt2        db "Please enter a second integer: "
  Prompt2Length  EQU $-Prompt2
- Message        db "The sum is: ", 0Dh, 0Ah     ;    These have memory locations.
+ Message        db "The sum is: "               ;    These have memory locations.
  MessageLength  EQU $-Message                   ; Address of this line ($) - address of Message
 
 section .bss                                    ; Uninitialized data segment
@@ -26,11 +26,13 @@ alignb 8
  StdOutHandle   resq 1
  StdInHandle    resq 1
  BytesWritten   resq 1                          ; Use for all output commands
+ BytesRead      resq 1
 
  Term1          resq 1                          ; First term of addition
  Term2          resq 1                          ; Second term of addition
+ Total          resq 1                          ; sum of the two terms
+ StartTotal     resq 1                          ; Starting address of the output string
  InputSpace     resb MAX_INPUT_LENGTH + 2       ; Use for all input commands
- BytesRead      resq 1
 
 section .text                                   ; Code segment
 Start:
@@ -75,13 +77,13 @@ Start:
 ;; Convert the first integer string -> int
  mov   EAX, 0                                   ; Clear EAX (where result will go)
  lea   RSI, [REL InputSpace]                    ; Beginning of the string
- mov   R8, [RSI + MAX_INPUT_LENGTH + 2]         ; BytesRead -> R8
+ mov   R8, [REL BytesRead]                      ; BytesRead -> R8
  sub   R8, 2                                    ; Subtract 2 to exclude the CR/LF at the end
- mov    R10, 10                                 ; Base 10; value in R10 to allow multiplying
+ mov   R10, 10                                  ; Base 10; value in R10 to allow multiplying
  ;; while R8 > 0
-while_R8_gt_0:
- test  R8, 0                                    ; compare R8 to 0
- jle   endwhile_R8_gt_0                         ; if R8 <= 0, jump to the end of the loop
+while_R8_gt_0_1:
+ cmp   R8, 0                                    ; compare R8 to 0
+ je    endwhile_R8_gt_0_1                         ; if R8 <= 0, jump to the end of the loop
 
  mov   cl, [RSI]                                ; Move one digit into CL
  sub   ECX, ASCII_ZERO                          ; Char to numeric
@@ -90,8 +92,9 @@ while_R8_gt_0:
  dec   R8                                       ; One less digit to handle
  inc   RSI                                      ; Point RSI at the next digit
 
- jmp   while_R8_gt_0                            ; Jump back to the beginning of the while and do it again
-endwhile_R8_gt_0:                               ; End the loop
+ jmp   while_R8_gt_0_1                            ; Jump back to the beginning of the while and do it again
+endwhile_R8_gt_0_1:                               ; End the loop
+ mov   [REL Term1], eax                         ; Store the term
 
 ;; Prompt for the second integer
  sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
@@ -117,8 +120,30 @@ endwhile_R8_gt_0:                               ; End the loop
  add   RSP, 48                                  ; Remove the 48 bytes
 
 ;; Convert the second integer string -> int
+ mov   EAX, 0                                   ; Clear EAX (where result will go)
+ lea   RSI, [REL InputSpace]                    ; Beginning of the string
+ mov   R8, [REL BytesRead]                      ; BytesRead -> R8
+ sub   R8, 2                                    ; Subtract 2 to exclude the CR/LF at the end
+ mov   R10, 10                                  ; Base 10; value in R10 to allow multiplying
+ ;; while R8 > 0
+while_R8_gt_0_2:
+ cmp   R8, 0                                    ; compare R8 to 0
+ je    endwhile_R8_gt_0_2                       ; if R8 <= 0, jump to the end of the loop
+
+ mov   cl, [RSI]                                ; Move one digit into CL
+ sub   ECX, ASCII_ZERO                          ; Char to numeric
+ mul   R10D                                     ; EAX *= 10 (previous digits)
+ add   eax, ecx                                 ; Add in the current digit
+ dec   R8                                       ; One less digit to handle
+ inc   RSI                                      ; Point RSI at the next digit
+
+ jmp   while_R8_gt_0_2                          ; Jump back to the beginning of the while and do it again
+endwhile_R8_gt_0_2:                             ; End the loop
+ mov   [REL Term2], eax                         ; Store the term
 
 ;; Find the sum
+ add    eax, [REL Term1]                        ; Do the actual addition
+ mov    [REL Total], eax                        ; Store the sum
 
 ;; Print the label for the sum
  sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
@@ -131,7 +156,37 @@ endwhile_R8_gt_0:                               ; End the loop
  call  WriteFile                                ; Output can be redirected to a file using >
  add   RSP, 48                                  ; Remove the 48 bytes
 
+;; Convert the sum to a string
+ mov    r8, 0                                   ; Clear byte count
+ lea    rdi, [REL InputSpace + MAX_INPUT_LENGTH - 1] ; Point to last digit
+ mov    [rdi+1], byte 0Dh                       ; Carriage return
+ mov    [rdi+2], byte 0Ah                       ; Line feed
+ add    r8, 2                                   ; Two bytes already there
+ mov    eax, [REL Total]                        ; EAX <- sum
+ mov    r10d, 0Ah                               ; R10D <- 10, for division
+Start_loop_int_to_string:
+ div    r10d                                    ; EAX <- EAX // 10, EDX <- EAX % 10
+ add    dl, ASCII_ZERO                          ; quantity to digit
+ mov    [rdi], dl                               ; Store the digit
+ mov    edx, 0                                  ; Clear EDX, so the div works
+ inc    r8                                      ; Another byte
+ dec    rdi                                     ; Move RDI back to the next space
+ cmp    eax, 0
+ jg     Start_loop_int_to_string                ; Back to the beginning of the loop
+ inc    rdi                                     ; Last decrement was bogus
+ mov    [REL StartTotal], rdi                   ; Store the starting address of the string
+ mov    [REL BytesRead], r8                     ; Store the length of the total string
+
 ;; Print the sum itself
+ sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
+                                                ; to a multiple of 16 bytes (MS x64 calling convention)
+ mov   RCX, qword [REL StdOutHandle]            ; 1st parameter
+ mov   RDX, [REL StartTotal]                    ; 2nd parameter; mov not lea!
+ mov   R8, [REL BytesRead]                      ; 3rd parameter
+ lea   R9, [REL BytesWritten]                   ; 4th parameter
+ mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
+ call  WriteFile                                ; Output can be redirected to a file using >
+ add   RSP, 48                                  ; Remove the 48 bytes
 
 ;; Return code 0 for normal completion
  mov   ECX, dword 0                             ; Produces 0 for the return code
