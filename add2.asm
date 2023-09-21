@@ -2,8 +2,9 @@
 NULL                EQU 0                       ; Constants, to be expanded by the preprocessor
 STD_OUTPUT_HANDLE   EQU -11                     ;   (no memory locations for these, just substituted into code)
 STD_INPUT_HANDLE    EQU -10
-MAX_INPUT_LENGTH    EQU 10                      ; Nine digits and a sign
+MAX_INPUT_LENGTH    EQU 11                      ; Ten digits and a sign (for 32 bits)
 ASCII_ZERO          EQU 48
+ASCII_MINUS         EQU 45
 
 extern GetStdHandle                             ; Import external symbols
 extern ReadFile
@@ -79,7 +80,23 @@ Start:
  lea   RSI, [REL InputSpace]                    ; Beginning of the string
  mov   R8, [REL BytesRead]                      ; BytesRead -> R8
  sub   R8, 2                                    ; Subtract 2 to exclude the CR/LF at the end
+ mov   R9D, 1                                   ; Sign
  mov   R10, 10                                  ; Base 10; value in R10 to allow multiplying
+
+ ;; Handle the sign character (if any)
+ cmp    R8, 0                                   ; Make sure there are actual characters to read
+ je     endwhile_R8_gt_0_1
+ mov    cl, [RSI]                               ; Look at the first char
+    ;;; If cl == '-'
+ cmp    cl, ASCII_MINUS
+    ;;;; jump if cl != '-'.  That is, *invert* the IF test you want.
+ jne    while_R8_gt_0_1                         ; If no sign, pretend we didn't even look
+
+ ;;; cl == '-'. Store the fact that we saw a '-' character.
+ neg    R9D                                     ; Sign <- -1
+ dec    R8                                      ; Consumed a character
+ inc    RSI
+
  ;; while R8 > 0
 while_R8_gt_0_1:
  cmp   R8, 0                                    ; compare R8 to 0
@@ -94,6 +111,7 @@ while_R8_gt_0_1:
 
  jmp   while_R8_gt_0_1                            ; Jump back to the beginning of the while and do it again
 endwhile_R8_gt_0_1:                               ; End the loop
+ imul  R9D                                      ; Result *will* fit in EAX
  mov   [REL Term1], eax                         ; Store the term
 
 ;; Prompt for the second integer
@@ -124,7 +142,23 @@ endwhile_R8_gt_0_1:                               ; End the loop
  lea   RSI, [REL InputSpace]                    ; Beginning of the string
  mov   R8, [REL BytesRead]                      ; BytesRead -> R8
  sub   R8, 2                                    ; Subtract 2 to exclude the CR/LF at the end
+ mov   R9D, 1                                   ; Sign
  mov   R10, 10                                  ; Base 10; value in R10 to allow multiplying
+
+ ;; Handle the sign character (if any)
+ cmp    R8, 0                                   ; Make sure there are actual characters to read
+ je     endwhile_R8_gt_0_2
+ mov    cl, [RSI]                               ; Look at the first char
+    ;;; If cl == '-'
+ cmp    cl, ASCII_MINUS
+    ;;;; jump if cl != '-'.  That is, *invert* the IF test you want.
+ jne    while_R8_gt_0_2                         ; If no sign, pretend we didn't even look
+
+ ;;; cl == '-'. Store the fact that we saw a '-' character.
+ neg    R9D                                     ; Sign <- -1
+ dec    R8                                      ; Consumed a character
+ inc    RSI
+
  ;; while R8 > 0
 while_R8_gt_0_2:
  cmp   R8, 0                                    ; compare R8 to 0
@@ -139,6 +173,7 @@ while_R8_gt_0_2:
 
  jmp   while_R8_gt_0_2                          ; Jump back to the beginning of the while and do it again
 endwhile_R8_gt_0_2:                             ; End the loop
+ imul  r9d                                      ; Multiply by the sign
  mov   [REL Term2], eax                         ; Store the term
 
 ;; Find the sum
@@ -163,7 +198,16 @@ endwhile_R8_gt_0_2:                             ; End the loop
  mov    [rdi+2], byte 0Ah                       ; Line feed
  add    r8, 2                                   ; Two bytes already there
  mov    eax, [REL Total]                        ; EAX <- sum
+ mov    r9d, 1                                  ; Sign
  mov    r10d, 0Ah                               ; R10D <- 10, for division
+
+    ;; Handle the sign
+ ;; if EAX < 0
+ cmp    eax, 0
+ jge    Start_loop_int_to_string                ; Jump if the condition is *false*
+ neg    r9d
+ neg    eax
+
 Start_loop_int_to_string:
  div    r10d                                    ; EAX <- EAX // 10, EDX <- EAX % 10
  add    dl, ASCII_ZERO                          ; quantity to digit
@@ -173,6 +217,15 @@ Start_loop_int_to_string:
  dec    rdi                                     ; Move RDI back to the next space
  cmp    eax, 0
  jg     Start_loop_int_to_string                ; Back to the beginning of the loop
+
+    ;;; Add '-' if the original total was negative
+ cmp    R9D, -1
+ jne    Store_result                            ; Jump if sign was *not* negative (R9D == 1)
+ mov    [rdi], byte ASCII_MINUS
+ inc    r8
+ dec    rdi
+
+Store_result:
  inc    rdi                                     ; Last decrement was bogus
  mov    [REL StartTotal], rdi                   ; Store the starting address of the string
  mov    [REL BytesRead], r8                     ; Store the length of the total string
