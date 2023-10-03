@@ -36,6 +36,29 @@ alignb 8
  InputSpace     resb MAX_INPUT_LENGTH + 2       ; Use for all input commands
 
 section .text                                   ; Code segment
+
+;;; Function str2int
+;;; Takes the address and length of a string
+;;; Returns the string converted to int (in EAX)
+;;; Handles negative inputs
+str2int: ;; Beginning of function is just a label
+   ;; Parameters are address of string and length of string
+   ;; Preamble: Copy parameters into shadow space
+   mov [rbp+8], rcx  ; Parameter 1
+   mov [rbp+16], rdx ; Parameter 2
+   mov [rbp+24], r8  ; Parameter 3 not actually used
+   mov [rbp+32], r9  ; parameter 4 not actually used
+
+
+
+   ;; At the end
+   ;; Retrieve the parameters from the shadow space
+   mov r9, [rbp+32]
+   mov r8, [rbp+24]
+   mov rdx, [rbp+16]
+   mov rcx, [rbp+8]
+   ret
+
 Start:
  sub   RSP, 8                                   ; Align the stack to a multiple of 16 bytes
 
@@ -74,6 +97,12 @@ Start:
  mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
  call  ReadFile                                 ; Output can be redirected to a file using >
  add   RSP, 48                                  ; Remove the 48 bytes
+
+ sub   RSP, 32                                  ; Shadow space
+ lea   RCX, [REL InputSpace]                    ; Addess of string
+ mov   EDX, [REL BytesRead]                     ; Length of string, including CRLF
+ call  str2int
+ add   RSP, 32                                  ; Dump shadow space
 
 ;; Convert the first integer string -> int
  mov   EAX, 0                                   ; Clear EAX (where result will go)
