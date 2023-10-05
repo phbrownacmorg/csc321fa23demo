@@ -38,26 +38,92 @@ alignb 8
 section .text                                   ; Code segment
 
 ;;; Function str2int
-;;; Takes the address and length of a string
+;;; Takes the length and address of a string
 ;;; Returns the string converted to int (in EAX)
 ;;; Handles negative inputs
 str2int: ;; Beginning of function is just a label
-   ;; Parameters are address of string and length of string
-   ;; Preamble: Copy parameters into shadow space
-   mov [rsp+8], rcx  ; Parameter 1
-   mov [rsp+16], rdx ; Parameter 2
+   ;; Parameters are length of the string and address of the string
+   ;; Entry code (preamble)
+   ;; Copy parameters into shadow space
+   mov [rsp+8], rcx  ; Parameter 1 (length)
+   mov [rsp+16], rdx ; Parameter 2 (address)
    mov [rsp+24], r8  ; Parameter 3 not actually used
    mov [rsp+32], r9  ; parameter 4 not actually used
+   ;; Save other registers used
+   push  rsi
+   push  r10
 
+   ;; Body code goes here
+   mov   eax, 0                                   ; Clear EAX (where result will go)
+   ;; Length of the string is already in ECX
+   mov   rsi, rdx                                 ; Beginning of the string
+   sub   ecx, 2                                   ; Subtract 2 to exclude the CR/LF at the end
+   mov   r8, 0                                    ; clear R8
+   mov   r9d, 1                                   ; Sign
+   mov   r10, 10                                  ; Base 10; value in R10 to allow multiplying
 
+   ;; Handle the sign character (if any)                         
+   jecxz endwhile_CX_gt_0_1                       ; Make sure there are actual characters to read
+   mov   r8b, [rsi]                               ; Look at the first char
+      ;;; If cl == '-'
+   cmp   r8b, ASCII_MINUS
+      ;;;; jump if cl != '-'.  That is, *invert* the IF test you want.
+   jne   while_CX_gt_0_1                          ; If no sign, pretend we didn't even look
+   ;;; cl == '-'. Store the fact that we saw a '-' character.
+   neg   r9d                                      ; Sign <- -1
+   dec   ecx                                      ; Consumed a character
+   inc   rsi
 
-   ;; At the end
+   ;; Main loop
+   jecxz  endwhile_CX_gt_0_1                      ; if CX <= 0, jump to the end of the loop
+   ;; while R8 > 0
+   while_CX_gt_0_1:
+      mul   r10d                                  ; EAX *= 10 (previous digits)
+      mov   r8b, [rsi]                            ; Move one digit into R8B
+      sub   r8b, ASCII_ZERO                       ; Char to numeric
+      add   eax, r8d                              ; Add in the current digit
+      inc   rsi                                   ; Point RSI at the next digit
+      loop  while_CX_gt_0_1                       ; Jump back to the beginning of the while and do it again
+   endwhile_CX_gt_0_1:                            ; End the loop
+   imul  r9d                                      ; Result *will* fit in EAX
+
+   ;; Exit code (epilogue)
+   ;; Restore other registers
+   pop   r10
+   pop   rsi
    ;; Retrieve the parameters from the shadow space
-   mov r9, [rsp+32]
-   mov r8, [rsp+24]
-   mov rdx, [rsp+16]
-   mov rcx, [rsp+8]
+   mov   r9, [rsp+32]
+   mov   r8, [rsp+24]
+   mov   rdx, [rsp+16]
+   mov   rcx, [rsp+8]
    ret
+
+;;;; Function int2str
+;;;; Takes an int and the address of a string
+;;;; Returns the number of bytes in the converted string in EAX
+;;;; Handles negative outputs
+int2str:
+   ;; Entry code (preamble)
+   ;; Copy parameters into shadow space
+   mov [rsp+8], rcx  ; Parameter 1 (length)
+   mov [rsp+16], rdx ; Parameter 2 (address)
+   mov [rsp+24], r8  ; Parameter 3 not actually used
+   mov [rsp+32], r9  ; parameter 4 not actually used
+   ;; Save other registers used
+
+
+   ;; Body code goes here
+
+
+   ;; Exit code (epilogue)
+   ;; Restore other registers
+   ;; Retrieve the parameters from the shadow space
+   mov   r9, [rsp+32]
+   mov   r8, [rsp+24]
+   mov   rdx, [rsp+16]
+   mov   rcx, [rsp+8]
+   ret
+
 
 Start:
  sub   RSP, 8                                   ; Align the stack to a multiple of 16 bytes
@@ -98,48 +164,13 @@ Start:
  call  ReadFile                                 ; Output can be redirected to a file using >
  add   RSP, 48                                  ; Remove the 48 bytes
 
- sub   RSP, 32                                  ; Shadow space
- lea   RCX, [REL InputSpace]                    ; Address of string
- mov   EDX, [REL BytesRead]                     ; Length of string, including CRLF
- call  str2int
- add   RSP, 32                                  ; Dump shadow space
-
 ;; Convert the first integer string -> int
- mov   EAX, 0                                   ; Clear EAX (where result will go)
- lea   RSI, [REL InputSpace]                    ; Beginning of the string
- mov   ECX, [REL BytesRead]                     ; BytesRead -> CX
- sub   ECX, 2                                   ; Subtract 2 to exclude the CR/LF at the end
- mov   R8, 0                                    ; clear R8
- mov   R9D, 1                                   ; Sign
- mov   R10, 10                                  ; Base 10; value in R10 to allow multiplying
-
- ;; Handle the sign character (if any)
-                                   
- jecxz   endwhile_CX_gt_0_1                      ; Make sure there are actual characters to read
- mov    r8b, [RSI]                               ; Look at the first char
-    ;;; If cl == '-'
- cmp    r8b, ASCII_MINUS
-    ;;;; jump if cl != '-'.  That is, *invert* the IF test you want.
- jne    while_CX_gt_0_1                         ; If no sign, pretend we didn't even look
-
- ;;; cl == '-'. Store the fact that we saw a '-' character.
- neg    R9D                                     ; Sign <- -1
- dec    ECX                                      ; Consumed a character
- inc    RSI
-
- jecxz  endwhile_CX_gt_0_1                       ; if CX <= 0, jump to the end of the loop
- ;; while R8 > 0
-while_CX_gt_0_1:
- mul   R10D                                     ; EAX *= 10 (previous digits)
- mov   r8b, [RSI]                               ; Move one digit into CL
- sub   r8b, ASCII_ZERO                          ; Char to numeric
- add   eax, r8d                                 ; Add in the current digit
- inc   RSI                                      ; Point RSI at the next digit
-
- loop  while_CX_gt_0_1                          ; Jump back to the beginning of the while and do it again
-endwhile_CX_gt_0_1:                             ; End the loop
- imul  R9D                                      ; Result *will* fit in EAX
+ sub   RSP, 32                                  ; Shadow space
+ mov   ECX, [REL BytesRead]                     ; Length of string, including CRLF
+ lea   RDX, [REL InputSpace]                    ; Address of string
+ call  str2int
  mov   [REL Term1], eax                         ; Store the term
+ add   RSP, 32                                  ; Dump shadow space
 
 ;; Prompt for the second integer
  sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
@@ -165,43 +196,12 @@ endwhile_CX_gt_0_1:                             ; End the loop
  add   RSP, 48                                  ; Remove the 48 bytes
 
 ;; Convert the second integer string -> int
- mov   EAX, 0                                   ; Clear EAX (where result will go)
- lea   RSI, [REL InputSpace]                    ; Beginning of the string
- mov   R8, [REL BytesRead]                      ; BytesRead -> R8
- sub   R8, 2                                    ; Subtract 2 to exclude the CR/LF at the end
- mov   R9D, 1                                   ; Sign
- mov   R10, 10                                  ; Base 10; value in R10 to allow multiplying
-
- ;; Handle the sign character (if any)
- cmp    R8, 0                                   ; Make sure there are actual characters to read
- je     endwhile_R8_gt_0_2
- mov    cl, [RSI]                               ; Look at the first char
-    ;;; If cl == '-'
- cmp    cl, ASCII_MINUS
-    ;;;; jump if cl != '-'.  That is, *invert* the IF test you want.
- jne    while_R8_gt_0_2                         ; If no sign, pretend we didn't even look
-
- ;;; cl == '-'. Store the fact that we saw a '-' character.
- neg    R9D                                     ; Sign <- -1
- dec    R8                                      ; Consumed a character
- inc    RSI
-
- ;; while R8 > 0
-while_R8_gt_0_2:
- cmp   R8, 0                                    ; compare R8 to 0
- je    endwhile_R8_gt_0_2                       ; if R8 <= 0, jump to the end of the loop
-
- mov   cl, [RSI]                                ; Move one digit into CL
- sub   ECX, ASCII_ZERO                          ; Char to numeric
- mul   R10D                                     ; EAX *= 10 (previous digits)
- add   eax, ecx                                 ; Add in the current digit
- dec   R8                                       ; One less digit to handle
- inc   RSI                                      ; Point RSI at the next digit
-
- jmp   while_R8_gt_0_2                          ; Jump back to the beginning of the while and do it again
-endwhile_R8_gt_0_2:                             ; End the loop
- imul  r9d                                      ; Multiply by the sign
+ sub   rsp, 32                                  ; Shadow space
+ mov   ecx, [REL BytesRead]                     ; Parameter 1: bytes read
+ lea   rdx, [REL InputSpace]                    ; Parameter 2: address of the string
+ call  str2int
  mov   [REL Term2], eax                         ; Store the term
+ add   rsp, 32                                  ; Dump the shadow space
 
 ;; Find the sum
  add    eax, [REL Term1]                        ; Do the actual addition

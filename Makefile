@@ -6,4 +6,5 @@
 
 .PHONY: clean
 clean:
-	${RM} *.obj *.exe
+	del *.obj
+	del *.exe
