@@ -44,19 +44,19 @@ section .text                                   ; Code segment
 str2int: ;; Beginning of function is just a label
    ;; Parameters are address of string and length of string
    ;; Preamble: Copy parameters into shadow space
-   mov [rbp+8], rcx  ; Parameter 1
-   mov [rbp+16], rdx ; Parameter 2
-   mov [rbp+24], r8  ; Parameter 3 not actually used
-   mov [rbp+32], r9  ; parameter 4 not actually used
+   mov [rsp+8], rcx  ; Parameter 1
+   mov [rsp+16], rdx ; Parameter 2
+   mov [rsp+24], r8  ; Parameter 3 not actually used
+   mov [rsp+32], r9  ; parameter 4 not actually used
 
 
 
    ;; At the end
    ;; Retrieve the parameters from the shadow space
-   mov r9, [rbp+32]
-   mov r8, [rbp+24]
-   mov rdx, [rbp+16]
-   mov rcx, [rbp+8]
+   mov r9, [rsp+32]
+   mov r8, [rsp+24]
+   mov rdx, [rsp+16]
+   mov rcx, [rsp+8]
    ret
 
 Start:
@@ -99,7 +99,7 @@ Start:
  add   RSP, 48                                  ; Remove the 48 bytes
 
  sub   RSP, 32                                  ; Shadow space
- lea   RCX, [REL InputSpace]                    ; Addess of string
+ lea   RCX, [REL InputSpace]                    ; Address of string
  mov   EDX, [REL BytesRead]                     ; Length of string, including CRLF
  call  str2int
  add   RSP, 32                                  ; Dump shadow space
