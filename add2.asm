@@ -63,28 +63,28 @@ str2int: ;; Beginning of function is just a label
    mov   r10, 10                                  ; Base 10; value in R10 to allow multiplying
 
    ;; Handle the sign character (if any)                         
-   jecxz endwhile_CX_gt_0_1                       ; Make sure there are actual characters to read
+   jecxz str2int_endLoop                          ; Make sure there are actual characters to read
    mov   r8b, [rsi]                               ; Look at the first char
       ;;; If cl == '-'
    cmp   r8b, ASCII_MINUS
       ;;;; jump if cl != '-'.  That is, *invert* the IF test you want.
-   jne   while_CX_gt_0_1                          ; If no sign, pretend we didn't even look
+   jne   str2int_Loop                             ; If no sign, pretend we didn't even look
    ;;; cl == '-'. Store the fact that we saw a '-' character.
    neg   r9d                                      ; Sign <- -1
    dec   ecx                                      ; Consumed a character
    inc   rsi
 
    ;; Main loop
-   jecxz  endwhile_CX_gt_0_1                      ; if CX <= 0, jump to the end of the loop
+   jecxz  str2int_endLoop                         ; if CX <= 0, jump to the end of the loop
    ;; while R8 > 0
-   while_CX_gt_0_1:
+   str2int_Loop:
       mul   r10d                                  ; EAX *= 10 (previous digits)
       mov   r8b, [rsi]                            ; Move one digit into R8B
       sub   r8b, ASCII_ZERO                       ; Char to numeric
       add   eax, r8d                              ; Add in the current digit
       inc   rsi                                   ; Point RSI at the next digit
-      loop  while_CX_gt_0_1                       ; Jump back to the beginning of the while and do it again
-   endwhile_CX_gt_0_1:                            ; End the loop
+      loop  str2int_Loop                          ; Jump back to the beginning of the while and do it again
+   str2int_endLoop:                               ; End the loop
    imul  r9d                                      ; Result *will* fit in EAX
 
    ;; Exit code (epilogue)
@@ -105,25 +105,75 @@ str2int: ;; Beginning of function is just a label
 int2str:
    ;; Entry code (preamble)
    ;; Copy parameters into shadow space
-   mov [rsp+8], rcx  ; Parameter 1 (length)
-   mov [rsp+16], rdx ; Parameter 2 (address)
-   mov [rsp+24], r8  ; Parameter 3 not actually used
-   mov [rsp+32], r9  ; parameter 4 not actually used
+   mov   [rsp+8], rcx  ; Parameter 1 (value)
+   mov   [rsp+16], rdx ; Parameter 2 (address)
+   mov   [rsp+24], r8  ; Parameter 3 not actually used
+   mov   [rsp+32], r9  ; parameter 4 not actually used
    ;; Save other registers used
-
+   push  rdi
+   push  r10
 
    ;; Body code goes here
+   mov   eax, ecx    ; EAX <- value
+   mov   rdi, rdx    ; Address
+   mov   rcx, 0      ; Clear rcx (will store byte count)
+   mov   r9, 1       ; Sign
+   mov   r10, 1      ; 10 ** 0, for counting digits
 
+   ;; Handle negative sign, if any
+   cmp   eax, 0
+   jge   int2str_CountDigits
+   neg   eax
+   neg   r9                      ; Sign is now negative
+   mov   byte [rdi], ASCII_MINUS 
+   inc   rdi                     ; Point to the place for the first digit
+                                 ; Count of characters will be incremented later
+
+   ;; Find number of digits
+   int2str_CountDigits:
+      inc   rcx
+      imul  r10d, 10  ; Signed multiplication so product can go in R10D
+      cmp   eax, r10d
+      jg    int2str_CountDigits
+   ;; RCX now holds the number of digits in the number
+   add   rdi, rcx    ; RDI = RDI + RCX - 1 (next line)
+   dec   rdi         ; RDI now points to the place for the *last* digit
+   mov   r10d, 10    ; Divisor
+   mov   rdx, 0      ; Clear out rdx before the first division
+
+   int2str_MainLoop:
+      div   r10d
+      add   dl, ASCII_ZERO    ; numeric to string
+      mov   [rdi], dl         ; Stow it away
+      mov   rdx, 0            ; Clear it out, so the next div works
+      dec   rdi               ; Back up to the previous digit
+      cmp   eax, 0
+      jg    int2str_MainLoop
+
+   ;; RDI now points one place before the first digit
+   add   rdi, rcx             ; add the number of digits
+   mov   [rdi+1], byte 0Dh    ; Carriage return.  Note this should be RDI+1 if there is no minus sign, but RDI if there is.
+   mov   [rdi+2], byte 0Ah    ; Line feed
+   add   rcx, 2               ; Add those 2 bytes to the length
+
+   ;; If the number was negative, increment ECX for the minus sign
+   cmp   r9, 0
+   jge   str2int_NoMinus
+   inc   ecx                  ; One more character for the minus sign
+   str2int_NoMinus:
+
+   mov   eax, ecx             ; Put the return value (number of bytes) into EAX
 
    ;; Exit code (epilogue)
    ;; Restore other registers
+   pop   r10
+   pop   rdi
    ;; Retrieve the parameters from the shadow space
    mov   r9, [rsp+32]
    mov   r8, [rsp+24]
    mov   rdx, [rsp+16]
    mov   rcx, [rsp+8]
    ret
-
 
 Start:
  sub   RSP, 8                                   ; Align the stack to a multiple of 16 bytes
@@ -219,49 +269,18 @@ Start:
  add   RSP, 48                                  ; Remove the 48 bytes
 
 ;; Convert the sum to a string
- mov    r8, 0                                   ; Clear byte count
- lea    rdi, [REL InputSpace + MAX_INPUT_LENGTH - 1] ; Point to last digit
- mov    [rdi+1], byte 0Dh                       ; Carriage return
- mov    [rdi+2], byte 0Ah                       ; Line feed
- add    r8, 2                                   ; Two bytes already there
- mov    eax, [REL Total]                        ; EAX <- sum
- mov    r9d, 1                                  ; Sign
- mov    r10d, 0Ah                               ; R10D <- 10, for division
-
-    ;; Handle the sign
- ;; if EAX < 0
- cmp    eax, 0
- jge    Start_loop_int_to_string                ; Jump if the condition is *false*
- neg    r9d
- neg    eax
-
-Start_loop_int_to_string:
- div    r10d                                    ; EAX <- EAX // 10, EDX <- EAX % 10
- add    dl, ASCII_ZERO                          ; quantity to digit
- mov    [rdi], dl                               ; Store the digit
- mov    edx, 0                                  ; Clear EDX, so the div works
- inc    r8                                      ; Another byte
- dec    rdi                                     ; Move RDI back to the next space
- cmp    eax, 0
- jg     Start_loop_int_to_string                ; Back to the beginning of the loop
-
-    ;;; Add '-' if the original total was negative
- cmp    R9D, -1
- jne    Store_result                            ; Jump if sign was *not* negative (R9D == 1)
- mov    [rdi], byte ASCII_MINUS
- inc    r8
- dec    rdi
-
-Store_result:
- inc    rdi                                     ; Last decrement was bogus
- mov    [REL StartTotal], rdi                   ; Store the starting address of the string
- mov    [REL BytesRead], r8                     ; Store the length of the total string
+ sub  rsp, 32                                   ; Shadow space
+ mov  ecx, [REL Total]                          ; Parameter 1: number
+ lea  rdx, [REL InputSpace]                     ; Parameter 2: address of string space
+ call int2str
+ mov  [REL BytesRead], eax                      ; Store the length of the string written
+ add  rsp, 32                                   ; Dump the shadow space
 
 ;; Print the sum itself
  sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
                                                 ; to a multiple of 16 bytes (MS x64 calling convention)
  mov   RCX, qword [REL StdOutHandle]            ; 1st parameter
- mov   RDX, [REL StartTotal]                    ; 2nd parameter; mov not lea!
+ lea   rdx, [REL InputSpace]
  mov   R8, [REL BytesRead]                      ; 3rd parameter
  lea   R9, [REL BytesWritten]                   ; 4th parameter
  mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
