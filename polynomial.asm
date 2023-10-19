@@ -20,7 +20,7 @@ section .data                                   ; Initialized data segment, most
  Prompt1Length  EQU $-Prompt1
  Prompt2        db "Please enter the polynomial degree: "
  Prompt2Length  EQU $-Prompt2
- Prompt3        db "Please enter a coefficient (lowest degree first): "
+ Prompt3        db "Please enter a coefficient (a0 to aN): "
  Prompt3Length  EQU $-Prompt3
  Message        db "f(x) = "               ;    These have memory locations.
  MessageLength  EQU $-Message                   ; Address of this line ($) - address of Message
@@ -168,6 +168,46 @@ int2str:
    ;; No need to retrieve the parameters from the shadow space
    ret
 
+;; Function ReadInt
+;; Parameters: OutputHandle, InputHandle, address of prompt, and prompt length
+;; Returns integer read in EAX
+ReadInt:
+   ;; Entry code (preamble)
+   ;; Copy parameters into shadow space
+   mov   [rsp+8], rcx  ; Parameter 1 (output handle)
+   mov   [rsp+16], rdx ; Parameter 2 (input handle)
+   mov   [rsp+24], r8  ; Parameter 3 (address of prompt)
+   mov   [rsp+32], r9 ; Parameter 4 (length of prompt)
+   ;; Make space for local parameters on the stack
+   sub   rsp, 8 * ((MAX_INPUT_LENGTH + 2) + 2 + 1)
+   ;; Variable addresses
+   ;; BytesRead: [rsp]
+   ;; BytesWritten: [rsp + 8]
+   ;; StringSpace: [rsp + 16]
+   ;; (return address): [rsp + 120]
+   ;; OutputHandle: [rsp + 128]
+   ;; InputHandle: [rsp + 136]
+   ;; Address of prompt: [rsp + 144]
+   ;; Length of prompt: [rsp + 152]
+
+   ;; Prompt
+   mov   rcx, [rsp+128]                           ; Parameter 1: output handle
+   mov   rdx, [rsp+144]                           ; Parameter 2: address of prompt
+   mov   r8, [rsp+152]                            ; Parameter 3: length of prompt
+   mov   r9, rsp                                  ; Parameter 4: address for bytes written
+   add   r9, 8                                    ;      which is rsp+8
+   sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
+   mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
+   call  WriteFile                                ; Output can be redirected to a file using >
+   add   RSP, 48                                  ; Remove the 48 bytes shadow space for WriteFile
+
+
+   ;; Exit code
+   ;; Get rid of local variable space
+   add   rsp, 8 * ((MAX_INPUT_LENGTH + 2) + 2 + 1)
+   ;; Ensure that result is in EAX, then
+   ret
+
 Start:
  sub   RSP, 8                                   ; Align the stack to a multiple of 16 bytes
 
@@ -185,16 +225,25 @@ Start:
  mov   qword [REL StdInHandle], RAX
  add   RSP, 32                                  ; Remove the 32 bytes
 
- ;; Prompt for X
- sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
-                                                ; to a multiple of 16 bytes (MS x64 calling convention)
- mov   RCX, qword [REL StdOutHandle]            ; 1st parameter
- lea   RDX, [REL Prompt1]                       ; 2nd parameter
- mov   R8, Prompt1Length                        ; 3rd parameter
- lea   R9, [REL BytesWritten]                   ; 4th parameter
- mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
- call  WriteFile                                ; Output can be redirected to a file using >
- add   RSP, 48                                  ; Remove the 48 bytes
+ ;; Read X
+ sub   rsp, 32                                  ; Shadow space
+ mov   rcx, qword [REL StdOutHandle]            ; 1st parameter
+ mov   rdx, qword [REL StdInHandle]             ; 2nd parameter
+ lea   r8, [REL Prompt1]                        ; 3rd parameter
+ mov   r9, Prompt1Length                        ; 4th parameter
+ call  ReadInt
+ add   rsp, 32                                  ; Dump shadow space
+
+;  ;; Prompt for X
+;  sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
+;                                                 ; to a multiple of 16 bytes (MS x64 calling convention)
+;  mov   RCX, qword [REL StdOutHandle]            ; 1st parameter
+;  lea   RDX, [REL Prompt1]                       ; 2nd parameter
+;  mov   R8, Prompt1Length                        ; 3rd parameter
+;  lea   R9, [REL BytesWritten]                   ; 4th parameter
+;  mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
+;  call  WriteFile                                ; Output can be redirected to a file using >
+;  add   RSP, 48                                  ; Remove the 48 bytes
 
 ;; Read X
  sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
