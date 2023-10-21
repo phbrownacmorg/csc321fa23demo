@@ -177,34 +177,63 @@ ReadInt:
    mov   [rsp+8], rcx  ; Parameter 1 (output handle)
    mov   [rsp+16], rdx ; Parameter 2 (input handle)
    mov   [rsp+24], r8  ; Parameter 3 (address of prompt)
-   mov   [rsp+32], r9 ; Parameter 4 (length of prompt)
+   mov   [rsp+32], r9  ; Parameter 4 (length of prompt)
+   ;; Push non-volatile registers
+   push  rbp
+   mov   rbp, rsp      ; Establish base pointer 
    ;; Make space for local parameters on the stack
    sub   rsp, 8 * ((MAX_INPUT_LENGTH + 2) + 2 + 1)
    ;; Variable addresses
-   ;; BytesRead: [rsp]
-   ;; BytesWritten: [rsp + 8]
-   ;; StringSpace: [rsp + 16]
-   ;; (return address): [rsp + 120]
-   ;; OutputHandle: [rsp + 128]
-   ;; InputHandle: [rsp + 136]
-   ;; Address of prompt: [rsp + 144]
-   ;; Length of prompt: [rsp + 152]
+   ;; BytesRead: [rbp - 128]
+   ;; BytesWritten: [rbp - 120]
+   ;; StringSpace: [rbp - 112]
+   ;; (old RBP): [rbp]
+   ;; (return address): [rbp + 8]
+   ;; OutputHandle: [rbp + 16]
+   ;; InputHandle: [rbp + 24]
+   ;; Address of prompt: [rbp + 32]
+   ;; Length of prompt: [rbp + 40]
 
    ;; Prompt
-   mov   rcx, [rsp+128]                           ; Parameter 1: output handle
-   mov   rdx, [rsp+144]                           ; Parameter 2: address of prompt
-   mov   r8, [rsp+152]                            ; Parameter 3: length of prompt
-   mov   r9, rsp                                  ; Parameter 4: address for bytes written
-   add   r9, 8                                    ;      which is rsp+8
-   sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
-   mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
-   call  WriteFile                                ; Output can be redirected to a file using >
-   add   RSP, 48                                  ; Remove the 48 bytes shadow space for WriteFile
+   sub   RSP, 32 + 8 + 8                     ; Shadow space + 5th parameter + align stack
+   mov   rcx, [rbp + 16]                     ; Parameter 1: output handle
+   mov   rdx, [rbp + 32]                     ; Parameter 2: address of prompt
+   mov   r8, [rbp + 40]                      ; Parameter 3: length of prompt
+   mov   r9, rbp                             ; Parameter 4: address for bytes written
+   sub   r9, 120                             ;      which is rbp - 120
+   mov   qword [RSP + 4 * 8], NULL           ; 5th parameter
+   call  WriteFile                           ; Output can be redirected to a file using >
+   add   RSP, 48                             ; Remove the 48 bytes shadow space for WriteFile
 
+   ;; Read
+   sub   RSP, 32 + 8 + 8                     ; Shadow space + 5th parameter + align stack
+                                             ; to a multiple of 16 bytes (MS x64 calling convention)
+   ;; Note we have to reload parameters from scratch.  They're all in volatile registers.
+   mov   rcx, [rbp + 24]                     ; Parameter 1: input handle
+   mov   rdx, rbp                            ; Parameter 2: address of string space
+   sub   rdx, 112                            ;     which is [rbp - 112]
+   mov   r8, MAX_INPUT_LENGTH                ; Parameter 3: maximum input length
+   mov   r9, rbp                             ; Parameter 4: address of bytes read
+   sub   r9, 128                             ;     which is [rbp - 128]
+   mov   qword [RSP + 4 * 8], NULL           ; 5th parameter
+   call  ReadFile                            
+   add   RSP, 48                             ; Remove the 48 bytes
+
+   ;; Convert to int
+   sub   rsp, 32                             ; Shadow space
+   ;; Again, reload parameters from scratch.
+   mov   rcx, [rbp-128]                      ; Length of string, including CRLF
+   mov   rdx, rbp                            ; Address of string space
+   sub   rdx, 112                            ;     which is [rbp - 128]
+   call  str2int
+   add   RSP, 32                             ; Dump shadow space
+   ;; Leave result in EAX
 
    ;; Exit code
    ;; Get rid of local variable space
    add   rsp, 8 * ((MAX_INPUT_LENGTH + 2) + 2 + 1)
+   ;; Pop non-volatile register
+   pop   rbp
    ;; Ensure that result is in EAX, then
    ret
 
@@ -232,69 +261,19 @@ Start:
  lea   r8, [REL Prompt1]                        ; 3rd parameter
  mov   r9, Prompt1Length                        ; 4th parameter
  call  ReadInt
+ mov   [REL X], eax                             ; Store the term
  add   rsp, 32                                  ; Dump shadow space
 
-;  ;; Prompt for X
-;  sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
-;                                                 ; to a multiple of 16 bytes (MS x64 calling convention)
-;  mov   RCX, qword [REL StdOutHandle]            ; 1st parameter
-;  lea   RDX, [REL Prompt1]                       ; 2nd parameter
-;  mov   R8, Prompt1Length                        ; 3rd parameter
-;  lea   R9, [REL BytesWritten]                   ; 4th parameter
-;  mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
-;  call  WriteFile                                ; Output can be redirected to a file using >
-;  add   RSP, 48                                  ; Remove the 48 bytes
-
-;; Read X
- sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
-                                                ; to a multiple of 16 bytes (MS x64 calling convention)
- mov   RCX, qword [REL StdInHandle]             ; 1st parameter
- lea   RDX, [REL StringSpace]                    ; 2nd parameter
- mov   R8, MAX_INPUT_LENGTH                     ; 3rd parameter
- lea   R9, [REL BytesRead]                      ; 4th parameter
- mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
- call  ReadFile                                 ; Output can be redirected to a file using >
- add   RSP, 48                                  ; Remove the 48 bytes
-
-;; Convert X string -> int
- sub   RSP, 32                                  ; Shadow space
- mov   ECX, [REL BytesRead]                     ; Length of string, including CRLF
- lea   RDX, [REL StringSpace]                   ; Address of string
- call  str2int
- mov   [REL X], eax                             ; Store the term
- add   RSP, 32                                  ; Dump shadow space
-
-;; Prompt for the degree
- sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
-                                                ; to a multiple of 16 bytes (MS x64 calling convention)
- mov   RCX, qword [REL StdOutHandle]            ; 1st parameter
- lea   RDX, [REL Prompt2]                       ; 2nd parameter
- mov   R8, Prompt2Length                        ; 3rd parameter
- lea   R9, [REL BytesWritten]                   ; 4th parameter
- mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
- call  WriteFile                                ; Output can be redirected to a file using >
- add   RSP, 48                                  ; Remove the 48 bytes
-
 ;; Read the degree
-
- sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
-                                                ; to a multiple of 16 bytes (MS x64 calling convention)
- mov   RCX, qword [REL StdInHandle]             ; 1st parameter
- lea   RDX, [REL StringSpace]                    ; 2nd parameter
- mov   R8, MAX_INPUT_LENGTH                     ; 3rd parameter
- lea   R9, [REL BytesRead]                      ; 4th parameter
- mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
- call  ReadFile                                 ; Output can be redirected to a file using >
- add   RSP, 48                                  ; Remove the 48 bytes
-
-;; Convert the degree string -> int
  sub   rsp, 32                                  ; Shadow space
- mov   ecx, [REL BytesRead]                     ; Parameter 1: bytes read
- lea   rdx, [REL StringSpace]                   ; Parameter 2: address of the string
- call  str2int
- mov   [REL Degree], eax                        ; Store the degree
- add   rsp, 32                                  ; Dump the shadow space
-
+ ;; Note we have to reload parameters from scratch.  They're all in volatile registers.
+ mov   rcx, qword [REL StdOutHandle]            ; 1st parameter
+ mov   rdx, qword [REL StdInHandle]             ; 2nd parameter
+ lea   r8, [REL Prompt2]                        ; 3rd parameter
+ mov   r9, Prompt2Length                        ; 4th parameter
+ call  ReadInt
+ mov   [REL Degree], eax                        ; Store the term
+ add   rsp, 32                                  ; Dump shadow space
 
 ;; Read the coefficients
 mov    rcx, [REL Degree]                        ; RCX <- degree
@@ -305,34 +284,13 @@ CoefficientLoop:
    push  rcx                                      ; Keep RCX safe
    push  r8                                       ; Keep the offset safe
 
-   ;; Prompt for the coefficient
-   sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
-                                                ; to a multiple of 16 bytes (MS x64 calling convention)
-   mov   RCX, qword [REL StdOutHandle]            ; 1st parameter
-   lea   RDX, [REL Prompt3]                       ; 2nd parameter
-   mov   R8, Prompt3Length                        ; 3rd parameter
-   lea   R9, [REL BytesWritten]                   ; 4th parameter
-   mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
-   call  WriteFile                                ; Output can be redirected to a file using >
-   add   RSP, 48                                  ; Remove the 48 bytes
-   
-   ;; Read the coefficient
-   sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
-                                                  ; to a multiple of 16 bytes (MS x64 calling convention)
-   mov   RCX, qword [REL StdInHandle]             ; 1st parameter
-   lea   RDX, [REL StringSpace]                   ; 2nd parameter
-   mov   R8, MAX_INPUT_LENGTH                     ; 3rd parameter
-   lea   R9, [REL BytesRead]                      ; 4th parameter
-   mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
-   call  ReadFile                                 ; Output can be redirected to a file using >
-   add   RSP, 48                                  ; Remove the 48 bytes
-
-   ;; Convert the coefficient string -> int
    sub   rsp, 32                                  ; Shadow space
-   mov   ecx, [REL BytesRead]                     ; Parameter 1: bytes read
-   lea   rdx, [REL StringSpace]                   ; Parameter 2: address of the string
-   call  str2int
-   add   rsp, 32                                  ; Dump the shadow space
+   mov   rcx, qword [REL StdOutHandle]            ; 1st parameter
+   mov   rdx, qword [REL StdInHandle]             ; 2nd parameter
+   lea   r8, [REL Prompt3]                        ; 3rd parameter
+   mov   r9, Prompt3Length                        ; 4th parameter
+   call  ReadInt
+   add   rsp, 32                                  ; Dump shadow space
 
    pop   r8                                       ; Pop the offset into Coefficients
    mov   [r8], eax                                ; Store off the coefficient
