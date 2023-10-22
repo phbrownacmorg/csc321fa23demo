@@ -22,7 +22,7 @@ section .data                                   ; Initialized data segment, most
  Prompt2Length  EQU $-Prompt2
  Prompt3        db "Please enter a coefficient (a0 to aN): "
  Prompt3Length  EQU $-Prompt3
- Message        db "f(x) = "               ;    These have memory locations.
+ Message        db "f(x) = "                    ;    These have memory locations.
  MessageLength  EQU $-Message                   ; Address of this line ($) - address of Message
 
 section .bss                                    ; Uninitialized data segment
@@ -37,12 +37,13 @@ alignb 8
  Coefficients   resq MAX_DEGREE + 1
  Fx             resq 1                          ; f(x)
  StringSpace    resb MAX_INPUT_LENGTH + 2       ; Use for all string conversions
+ ShadowSize     resq 1                          ; Size of shadow space for polynomial_eval
 
 section .text                                   ; Code segment
 
 ;;; Function str2int
 ;;; Takes the length and address of a string
-;;; Returns the string converted to int (in EAX)
+;;; Returns the string converted to int (in RAX)
 ;;; Handles negative inputs
 str2int: ;; Beginning of function is just a label
    ;; Parameters are length of the string and address of the string
@@ -56,10 +57,10 @@ str2int: ;; Beginning of function is just a label
    push  rsi
    
    ;; Body code goes here
-   mov   eax, 0                                   ; Clear EAX (where result will go)
+   mov   rax, 0                                   ; Clear RAX (where result will go)
    ;; Length of the string is already in ECX
    mov   rsi, rdx                                 ; Beginning of the string
-   sub   ecx, 2                                   ; Subtract 2 to exclude the CR/LF at the end
+   sub   rcx, 2                                   ; Subtract 2 to exclude the CR/LF at the end
    mov   r8, 0                                    ; clear R8
    mov   r9d, 1                                   ; Sign
    mov   r10, 10                                  ; Base 10; value in R10 to allow multiplying
@@ -73,7 +74,7 @@ str2int: ;; Beginning of function is just a label
    jne   str2int_Loop                             ; If no sign, pretend we didn't even look
    ;;; cl == '-'. Store the fact that we saw a '-' character.
    neg   r9d                                      ; Sign <- -1
-   dec   ecx                                      ; Consumed a character
+   dec   rcx                                      ; Consumed a character
    inc   rsi
 
    ;; Main loop
@@ -83,11 +84,11 @@ str2int: ;; Beginning of function is just a label
       mul   r10d                                  ; EAX *= 10 (previous digits)
       mov   r8b, [rsi]                            ; Move one digit into R8B
       sub   r8b, ASCII_ZERO                       ; Char to numeric
-      add   eax, r8d                              ; Add in the current digit
+      add   rax, r8                               ; Add in the current digit
       inc   rsi                                   ; Point RSI at the next digit
       loop  str2int_Loop                          ; Jump back to the beginning of the while and do it again
    str2int_endLoop:                               ; End the loop
-   imul  r9d                                      ; Result *will* fit in EAX
+   imul  r9                                       ; Result *will* fit in RAX
 
    ;; Exit code (epilogue)
    ;; Restore saved, non-volatile register(s)
@@ -112,16 +113,16 @@ int2str:
    ;;; I also use R10, but it's volatile
 
    ;; Body code goes here
-   mov   eax, ecx    ; EAX <- value
+   mov   rax, rcx    ; RAX <- value
    mov   rdi, rdx    ; Address
    mov   rcx, 0      ; Clear rcx (will store byte count)
    mov   r9, 1       ; Sign
    mov   r10, 1      ; 10 ** 0, for counting digits
 
    ;; Handle negative sign, if any
-   cmp   eax, 0
+   cmp   rax, 0
    jge   int2str_CountDigits
-   neg   eax
+   neg   rax
    neg   r9                      ; Sign is now negative
    mov   byte [rdi], ASCII_MINUS 
    inc   rdi                     ; Point to the place for the first digit
@@ -130,22 +131,22 @@ int2str:
    ;; Find number of digits
    int2str_CountDigits:
       inc   rcx
-      imul  r10d, 10  ; Signed multiplication so product can go in R10D
-      cmp   eax, r10d
+      imul  r10, 10  ; Signed multiplication so product can go in R10
+      cmp   rax, r10
       jg    int2str_CountDigits
    ;; RCX now holds the number of digits in the number
    add   rdi, rcx    ; RDI = RDI + RCX - 1 (next line)
    dec   rdi         ; RDI now points to the place for the *last* digit
-   mov   r10d, 10    ; Divisor
+   mov   r10, 10     ; Divisor
    mov   rdx, 0      ; Clear out rdx before the first division
 
    int2str_MainLoop:
-      div   r10d
+      div   r10
       add   dl, ASCII_ZERO    ; numeric to string
       mov   [rdi], dl         ; Stow it away
       mov   rdx, 0            ; Clear it out, so the next div works
       dec   rdi               ; Back up to the previous digit
-      cmp   eax, 0
+      cmp   rax, 0
       jg    int2str_MainLoop
 
    ;; RDI now points one place before the first digit
@@ -157,10 +158,10 @@ int2str:
    ;; If the number was negative, increment ECX for the minus sign
    cmp   r9, 0
    jge   int2str_NoMinus
-   inc   ecx                  ; One more character for the minus sign
+   inc   rcx                  ; One more character for the minus sign
    int2str_NoMinus:
 
-   mov   eax, ecx             ; Put the return value (number of bytes) into EAX
+   mov   rax, rcx             ; Put the return value (number of bytes) into EAX
 
    ;; Exit code (epilogue)
    ;; Restore other registers
@@ -224,17 +225,113 @@ ReadInt:
    ;; Again, reload parameters from scratch.
    mov   rcx, [rbp-128]                      ; Length of string, including CRLF
    mov   rdx, rbp                            ; Address of string space
-   sub   rdx, 112                            ;     which is [rbp - 128]
+   sub   rdx, 112                            ;     which is [rbp - 112]
    call  str2int
    add   RSP, 32                             ; Dump shadow space
-   ;; Leave result in EAX
+   ;; Leave result in RAX
 
    ;; Exit code
    ;; Get rid of local variable space
    add   rsp, 8 * ((MAX_INPUT_LENGTH + 2) + 2 + 1)
    ;; Pop non-volatile register
    pop   rbp
-   ;; Ensure that result is in EAX, then
+   ;; Ensure that result is in RAX, then
+   ret
+
+;; Function WriteInt
+;; Parameters: OutputHandle, address of label, label length, number to print
+;; Returns number of characters printed when printing the number (i.e., digits+2)
+WriteInt:
+      ;; Entry code (preamble)
+   ;; Copy parameters into shadow space
+   mov   [rsp+8], rcx  ; Parameter 1 (output handle)
+   mov   [rsp+16], rdx ; Parameter 2 (address of label)
+   mov   [rsp+24], r8  ; Parameter 3 (length of label)
+   mov   [rsp+32], r9  ; Parameter 4 (number to print)
+   ;; Push non-volatile registers
+   push  rbp
+   mov   rbp, rsp      ; Establish base pointer 
+   ;; Make space for local parameters on the stack
+   sub   rsp, 8 * ((MAX_INPUT_LENGTH + 2) + 1)
+   ;; Variable addresses
+   ;; ByteCount: [rbp - 112]
+   ;; StringSpace: [rbp - 104]
+   ;; (old RBP): [rbp]
+   ;; (return address): [rbp + 8]
+   ;; OutputHandle: [rbp + 16]
+   ;; Label address: [rbp + 24]
+   ;; Label length: [rbp + 32]
+   ;; Number to print: [rbp + 40]
+
+   ;; Print label
+   sub   RSP, 32 + 8 + 8                     ; Shadow space + 5th parameter + align stack
+   mov   rcx, [rbp + 16]                     ; Parameter 1: output handle
+   mov   rdx, [rbp + 24]                     ; Parameter 2: address of label
+   mov   r8, [rbp + 32]                      ; Parameter 3: length of label
+   mov   r9, rbp                             ; Parameter 4: address for bytes written
+   sub   r9, 112                             ;      which is rbp - 112
+   mov   qword [RSP + 4 * 8], NULL           ; 5th parameter
+   call  WriteFile                           ; Output can be redirected to a file using >
+   add   RSP, 48                             ; Remove the 48 bytes shadow space for WriteFile
+
+   ;; Convert number to string
+   sub   rsp, 32                             ; Shadow space
+   mov   rcx, [rbp + 40]                     ; Parameter 1: number
+   mov   rdx, rbp                            ; Parameter 2: address of string space
+   sub   rdx, 104                            ;       which is rbp - 104
+   call  int2str
+   mov   [rbp - 112], rax                    ; Store the length of the string
+   add   rsp, 32                             ; Dump the shadow space
+   
+   ;; Print number
+
+   sub   RSP, 32 + 8 + 8                     ; Shadow space + 5th parameter + align stack
+                                             ; to a multiple of 16 bytes (MS x64 calling convention)
+   mov   rcx, [rbp + 16]                     ; Parameter 1: output handle
+   mov   rdx, rbp                            ; Parameter 2: address of the number string
+   sub   rdx, 104                            ;        which is rbp - 104
+   mov   r8, [rbp - 112]                     ; Parameter 3: length of the string
+   mov   r9, rbp                             ; Parameter 4: address for bytes written
+   sub   r9, 112                             ;        which is rbp - 112
+   mov   qword [RSP + 4 * 8], NULL           ; 5th parameter
+   call  WriteFile                           ; Output can be redirected to a file using >
+   add   RSP, 48                             ; Remove the 48 bytes shadow space for WriteFile
+
+   ;; Exit code
+   ;; Get rid of local variable space
+   add   rsp, 8 * ((MAX_INPUT_LENGTH + 2) + 1)
+   ;; Pop non-volatile register
+   pop   rbp
+   ret
+
+;; Function polynomial_shadow_size
+;; One parameter: the degree of the polynomial
+;; Return value (in RAX): the size of the shadow space for polynomial_eval
+polynomial_ShadowSize:
+   ;; Entry code (preamble)
+   ;; Copy parameters into shadow space
+   mov   [rsp+8], rcx  ; Parameter 1 (polynomial degree)
+   ;; No need for a stack frame
+
+   mov   rax, rcx                      ; Start with the degree of the polynomial
+   inc   rax                           ; Degree + 1 = number of coefficients
+   add   rax, 2                        ; Two more for X and the degree
+   sub   rax, 4                        ; Four parameters in registers
+                                       ; RAX now has the number of parameters that will 
+                                       ;     need to be passed in the shadow space
+   jns   polynomial_ParametersOver4    ; if RAX >= 0, leave it alone
+   mov   rax, 0                        ; else (RAX is negative), RAX <- 0
+
+   polynomial_ParametersOver4:
+   mov   r9, 8                         ; Multiplier (quadwords to bytes)
+   mul   r9                            ; RAX now has the bytes for the fifth+ parameters to polynomial_eval
+   add   rax, 32                       ; Add on the basic 32 bytes
+   test  rax, 15                       ; Gives zero iff EAX is a multiple of 16
+   jz    polynomial_FoundShadowSize    ; If EAX % 16 == 0, don't bother to add an extra 8
+   add   rax, 8
+
+   polynomial_FoundShadowSize:
+   ;; Exit code
    ret
 
 Start:
@@ -242,14 +339,14 @@ Start:
 
  ;; Get the handle for stdout
  sub   RSP, 32                                  ; 32 bytes of shadow space (MS x64 calling convention)
- mov   ECX, STD_OUTPUT_HANDLE
+ mov   RCX, STD_OUTPUT_HANDLE
  call  GetStdHandle
  mov   qword [REL StdOutHandle], RAX
  add   RSP, 32                                  ; Remove the 32 bytes
 
  ;; Get the handle for stdin
  sub   RSP, 32                                  ; 32 bytes of shadow space (MS x64 calling convention)
- mov   ECX, STD_INPUT_HANDLE
+ mov   RCX, STD_INPUT_HANDLE
  call  GetStdHandle
  mov   qword [REL StdInHandle], RAX
  add   RSP, 32                                  ; Remove the 32 bytes
@@ -261,7 +358,7 @@ Start:
  lea   r8, [REL Prompt1]                        ; 3rd parameter
  mov   r9, Prompt1Length                        ; 4th parameter
  call  ReadInt
- mov   [REL X], eax                             ; Store the term
+ mov   [REL X], rax                             ; Store the term
  add   rsp, 32                                  ; Dump shadow space
 
 ;; Read the degree
@@ -272,7 +369,7 @@ Start:
  lea   r8, [REL Prompt2]                        ; 3rd parameter
  mov   r9, Prompt2Length                        ; 4th parameter
  call  ReadInt
- mov   [REL Degree], eax                        ; Store the term
+ mov   [REL Degree], rax                        ; Store the term
  add   rsp, 32                                  ; Dump shadow space
 
 ;; Read the coefficients
@@ -281,21 +378,21 @@ inc    rcx                                      ; RCX <- number of coefficients
 lea    r8, [REL Coefficients]
 
 CoefficientLoop:
-   push  rcx                                      ; Keep RCX safe
-   push  r8                                       ; Keep the offset safe
+   push  rcx                                    ; Keep RCX safe
+   push  r8                                     ; Keep the offset safe
 
-   sub   rsp, 32                                  ; Shadow space
-   mov   rcx, qword [REL StdOutHandle]            ; 1st parameter
-   mov   rdx, qword [REL StdInHandle]             ; 2nd parameter
-   lea   r8, [REL Prompt3]                        ; 3rd parameter
-   mov   r9, Prompt3Length                        ; 4th parameter
+   sub   rsp, 32                                ; Shadow space
+   mov   rcx, qword [REL StdOutHandle]          ; 1st parameter
+   mov   rdx, qword [REL StdInHandle]           ; 2nd parameter
+   lea   r8, [REL Prompt3]                      ; 3rd parameter
+   mov   r9, Prompt3Length                      ; 4th parameter
    call  ReadInt
-   add   rsp, 32                                  ; Dump shadow space
+   add   rsp, 32                                ; Dump shadow space
 
-   pop   r8                                       ; Pop the offset into Coefficients
-   mov   [r8], eax                                ; Store off the coefficient
-   add   r8, 8                                    ; Bump r8 along the Coefficients array
-   pop   rcx                                      ; Get RCX back
+   pop   r8                                     ; Pop the offset into Coefficients
+   mov   [r8], rax                              ; Store off the coefficient
+   add   r8, 8                                  ; Bump r8 along the Coefficients array
+   pop   rcx                                    ; Get RCX back
    dec   rcx
    jrcxz CoefficientsRead
    jmp   CoefficientLoop
@@ -303,42 +400,26 @@ CoefficientLoop:
 CoefficientsRead:
 
 ;; How much shadow space will we need for eval_poly?
+sub   rsp, 32
+mov   rcx, [REL Degree]
+call  polynomial_ShadowSize
+mov   [REL ShadowSize], rax
+add   rsp, 32
 
+;; Find the sum (temporary)
+; mov   rax, [REL Coefficients]
+; add   rax, [REL Coefficients + 8]
+mov   [REL Fx], rax
 
-; ;; Find the sum
-;  add    eax, [REL Term1]                        ; Do the actual addition
-;  mov    [REL Total], eax                        ; Store the sum
-
-; ;; Print the label for the sum
-;  sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
-;                                                 ; to a multiple of 16 bytes (MS x64 calling convention)
-;  mov   RCX, qword [REL StdOutHandle]            ; 1st parameter
-;  lea   RDX, [REL Message]                       ; 2nd parameter
-;  mov   R8, MessageLength                        ; 3rd parameter
-;  lea   R9, [REL BytesWritten]                   ; 4th parameter
-;  mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
-;  call  WriteFile                                ; Output can be redirected to a file using >
-;  add   RSP, 48                                  ; Remove the 48 bytes
-
-; ;; Convert the sum to a string
-;  sub  rsp, 32                                   ; Shadow space
-;  mov  ecx, [REL Total]                          ; Parameter 1: number
-;  lea  rdx, [REL StringSpace]                     ; Parameter 2: address of string space
-;  call int2str
-;  mov  [REL BytesRead], eax                      ; Store the length of the string written
-;  add  rsp, 32                                   ; Dump the shadow space
-
-; ;; Print the sum itself
-;  sub   RSP, 32 + 8 + 8                          ; Shadow space + 5th parameter + align stack
-;                                                 ; to a multiple of 16 bytes (MS x64 calling convention)
-;  mov   RCX, qword [REL StdOutHandle]            ; 1st parameter
-;  lea   rdx, [REL StringSpace]
-;  mov   R8, [REL BytesRead]                      ; 3rd parameter
-;  lea   R9, [REL BytesWritten]                   ; 4th parameter
-;  mov   qword [RSP + 4 * 8], NULL                ; 5th parameter
-;  call  WriteFile                                ; Output can be redirected to a file using >
-;  add   RSP, 48                                  ; Remove the 48 bytes
+; Print the result
+sub   rsp, 32                                   ; Shadow space
+mov   rcx, qword [REL StdOutHandle]
+lea   rdx, [REL Message]
+mov   r8, MessageLength
+mov   r9, [REL Fx]                              ; result value
+call  WriteInt
+add   rsp, 32
 
 ;; Return code 0 for normal completion
- mov   ECX, dword 0                             ; Produces 0 for the return code
- call  ExitProcess
+mov   RCX, qword 0                             ; Produces 0 for the return code
+call  ExitProcess
