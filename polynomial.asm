@@ -185,9 +185,9 @@ ReadInt:
    ;; Make space for local parameters on the stack
    sub   rsp, 8 * ((MAX_INPUT_LENGTH + 2) + 2 + 1)
    ;; Variable addresses
-   ;; BytesRead: [rbp - 128]
-   ;; BytesWritten: [rbp - 120]
-   ;; StringSpace: [rbp - 112]
+   ;; BytesRead: [rbp - 120]
+   ;; BytesWritten: [rbp - 112]
+   ;; StringSpace: [rbp - 104]
    ;; (old RBP): [rbp]
    ;; (return address): [rbp + 8]
    ;; OutputHandle: [rbp + 16]
@@ -201,7 +201,7 @@ ReadInt:
    mov   rdx, [rbp + 32]                     ; Parameter 2: address of prompt
    mov   r8, [rbp + 40]                      ; Parameter 3: length of prompt
    mov   r9, rbp                             ; Parameter 4: address for bytes written
-   sub   r9, 120                             ;      which is rbp - 120
+   sub   r9, 112                             ;      which is rbp - 112
    mov   qword [RSP + 4 * 8], NULL           ; 5th parameter
    call  WriteFile                           ; Output can be redirected to a file using >
    add   RSP, 48                             ; Remove the 48 bytes shadow space for WriteFile
@@ -212,10 +212,10 @@ ReadInt:
    ;; Note we have to reload parameters from scratch.  They're all in volatile registers.
    mov   rcx, [rbp + 24]                     ; Parameter 1: input handle
    mov   rdx, rbp                            ; Parameter 2: address of string space
-   sub   rdx, 112                            ;     which is [rbp - 112]
+   sub   rdx, 104                            ;     which is [rbp - 104]
    mov   r8, MAX_INPUT_LENGTH                ; Parameter 3: maximum input length
    mov   r9, rbp                             ; Parameter 4: address of bytes read
-   sub   r9, 128                             ;     which is [rbp - 128]
+   sub   r9, 120                             ;     which is [rbp - 120]
    mov   qword [RSP + 4 * 8], NULL           ; 5th parameter
    call  ReadFile                            
    add   RSP, 48                             ; Remove the 48 bytes
@@ -223,9 +223,9 @@ ReadInt:
    ;; Convert to int
    sub   rsp, 32                             ; Shadow space
    ;; Again, reload parameters from scratch.
-   mov   rcx, [rbp-128]                      ; Length of string, including CRLF
+   mov   rcx, [rbp-120]                      ; Length of string, including CRLF
    mov   rdx, rbp                            ; Address of string space
-   sub   rdx, 112                            ;     which is [rbp - 112]
+   sub   rdx, 104                            ;     which is [rbp - 104]
    call  str2int
    add   RSP, 32                             ; Dump shadow space
    ;; Leave result in RAX
@@ -334,6 +334,42 @@ polynomial_ShadowSize:
    ;; Exit code
    ret
 
+;; Function eval_poly
+;; Parameters are the X at which to evaluate, the degree of the polynomial,
+;; and the coefficients in order from a0 to aN.
+;; The result of the evaluation is returned in RAX.
+eval_poly:
+   ;; Entry code (preamble)
+   ;; Copy parameters into shadow space
+   mov   [rsp+8], rcx            ; Parameter 1 (X)
+   mov   [rsp+16], rdx           ; Parameter 2 (degree)
+   mov   [rsp+24], r8            ; Parameter 3 (a0)
+   mov   [rsp+32], r9            ; Parameter 4 (a1)
+
+   ;; Body code
+   mov   r10, rcx                ; r10 <- X
+   mov   rcx, rdx                ; rcx <- degree
+   ;; Calculate address of last coefficient on stack
+   mov   r11, rcx                ; R11 <- degree
+   add   r11, 3                  ; Plus two more parameters and a return address
+                                 ;     before a0 on the stack
+   sal   r11, 3                  ; R11 <- R11 * 8 (convert to bytes)
+   add   r11, rsp                ; Add RSP so R11 points to aN
+
+   mov   rax, [r11]
+   jrcxz AfterHorner
+   HornersLoop:
+      mul   r10
+      sub   r11, 8               ; Move R11 back to the next coefficient
+      add   rax, [r11]           ; Add the next coefficient
+      loop  HornersLoop          ; The LOOP instruction actually decrements and
+                                 ;    tests ECX, not RCX.  For a number as
+                                 ;    small as the degree, it doesn't matter.
+   AfterHorner:
+   ;; Exit code: result is already in RAX. Used no non-volatile registers and
+   ;; no local variables.
+   ret
+
 Start:
  sub   RSP, 8                                   ; Align the stack to a multiple of 16 bytes
 
@@ -406,10 +442,41 @@ call  polynomial_ShadowSize
 mov   [REL ShadowSize], rax
 add   rsp, 32
 
-;; Find the sum (temporary)
-; mov   rax, [REL Coefficients]
-; add   rax, [REL Coefficients + 8]
+;; Evaluate the polynomial
+sub   rsp, [REL ShadowSize]         ; Make the shadow space
+
+;; Put the 5th and following parameters on the stack (if they exist)
+mov   rcx, [REL Degree]             ; Put degree in RCX
+dec   RCX                           ; Degree - 1 = number of coefficients on stack
+cmp   rcx, 0
+jle   CoefficientsLoaded            ; if RCX <= 0, no coefficients to load
+
+lea   r10, [REL Coefficients + 16]  ; Pointer to a2
+lea   r11, [RSP + 4 * 8]            ; Pointer to the stack location for a2
+
+LoadCoefficients:
+mov   r9, [r10]                     ; Load a coefficient into a register
+mov   [r11], r9                     ; Load it onto the stack
+add   r10, 8                        ; Push the pointers along
+add   r11, 8
+loop  LoadCoefficients
+
+CoefficientsLoaded:
+;; Load the first 4 parameters
+mov   rcx, [REL X]
+mov   rdx, [REL Degree]
+mov   r8, [REL Coefficients]        ; a0
+cmp   rdx, 0
+je    BlankA1                       ; if degree > 0, load a1
+mov   r9, [REL Coefficients + 8]    ; a1
+jmp   ParametersLoaded
+BlankA1:                            ; else (degree == 0), let a1 == 0
+mov   r9, 0                         ; a1
+ParametersLoaded:
+
+call  eval_poly
 mov   [REL Fx], rax
+add   rsp, [REL ShadowSize]         ; Dump the shadow space
 
 ; Print the result
 sub   rsp, 32                                   ; Shadow space
