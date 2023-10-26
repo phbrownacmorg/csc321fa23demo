@@ -99,12 +99,12 @@ str2int_OCD: ;; Beginning of function is just a label
    mov   rcx, [rsp+8]
    ret
 
-;;;; Function int2str_OCD
+;;;; Function .OCD
 ;;;; Takes an int and the address of a string
 ;;;; Returns the number of bytes in the converted string in EAX
 ;;;; Handles negative outputs
 ;;;; This is the paranoid version
-int2str_OCD:
+.OCD:
    ;; Entry code (preamble)
    ;; Copy parameters into shadow space
    mov   [rsp+8], rcx  ; Parameter 1 (value)
@@ -124,7 +124,7 @@ int2str_OCD:
 
    ;; Handle negative sign, if any
    cmp   eax, 0
-   jge   int2str_OCD_CountDigits
+   jge   .OCD_CountDigits
    neg   eax
    neg   r9                      ; Sign is now negative
    mov   byte [rdi], ASCII_MINUS 
@@ -132,25 +132,25 @@ int2str_OCD:
                                  ; Count of characters will be incremented later
 
    ;; Find number of digits
-   int2str_OCD_CountDigits:
+   .OCD_CountDigits:
       inc   rcx
       imul  r10d, 10  ; Signed multiplication so product can go in R10D
       cmp   eax, r10d
-      jg    int2str_OCD_CountDigits
+      jg    .OCD_CountDigits
    ;; RCX now holds the number of digits in the number
    add   rdi, rcx    ; RDI = RDI + RCX - 1 (next line)
    dec   rdi         ; RDI now points to the place for the *last* digit
    mov   r10d, 10    ; Divisor
    mov   rdx, 0      ; Clear out rdx before the first division
 
-   int2str_OCD_MainLoop:
+   .OCD_MainLoop:
       div   r10d
       add   dl, ASCII_ZERO    ; numeric to string
       mov   [rdi], dl         ; Stow it away
       mov   rdx, 0            ; Clear it out, so the next div works
       dec   rdi               ; Back up to the previous digit
       cmp   eax, 0
-      jg    int2str_OCD_MainLoop
+      jg    .OCD_MainLoop
 
    ;; RDI now points one place before the first digit
    add   rdi, rcx             ; add the number of digits
@@ -160,9 +160,9 @@ int2str_OCD:
 
    ;; If the number was negative, increment ECX for the minus sign
    cmp   r9, 0
-   jge   int2str_OCD_NoMinus
+   jge   .OCD_NoMinus
    inc   ecx                  ; One more character for the minus sign
-   int2str_OCD_NoMinus:
+   .OCD_NoMinus:
 
    mov   eax, ecx             ; Put the return value (number of bytes) into EAX
 
@@ -257,7 +257,7 @@ int2str:
 
    ;; Handle negative sign, if any
    cmp   eax, 0
-   jge   int2str_CountDigits
+   jge   .CountDigits
    neg   eax
    neg   r9                      ; Sign is now negative
    mov   byte [rdi], ASCII_MINUS 
@@ -265,25 +265,25 @@ int2str:
                                  ; Count of characters will be incremented later
 
    ;; Find number of digits
-   int2str_CountDigits:
+   .CountDigits:
       inc   rcx
       imul  r10d, 10  ; Signed multiplication so product can go in R10D
       cmp   eax, r10d
-      jg    int2str_CountDigits
+      jg    .CountDigits
    ;; RCX now holds the number of digits in the number
    add   rdi, rcx    ; RDI = RDI + RCX - 1 (next line)
    dec   rdi         ; RDI now points to the place for the *last* digit
    mov   r10d, 10    ; Divisor
    mov   rdx, 0      ; Clear out rdx before the first division
 
-   int2str_MainLoop:
+   .MainLoop:
       div   r10d
       add   dl, ASCII_ZERO    ; numeric to string
       mov   [rdi], dl         ; Stow it away
       mov   rdx, 0            ; Clear it out, so the next div works
       dec   rdi               ; Back up to the previous digit
       cmp   eax, 0
-      jg    int2str_MainLoop
+      jg    .MainLoop
 
    ;; RDI now points one place before the first digit
    add   rdi, rcx             ; add the number of digits
@@ -293,9 +293,9 @@ int2str:
 
    ;; If the number was negative, increment ECX for the minus sign
    cmp   r9, 0
-   jge   int2str_NoMinus
+   jge   .NoMinus
    inc   ecx                  ; One more character for the minus sign
-   int2str_NoMinus:
+   .NoMinus:
 
    mov   eax, ecx             ; Put the return value (number of bytes) into EAX
 

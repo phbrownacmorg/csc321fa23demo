@@ -66,28 +66,28 @@ str2int: ;; Beginning of function is just a label
    mov   r10, 10                                  ; Base 10; value in R10 to allow multiplying
 
    ;; Handle the sign character (if any)                         
-   jecxz str2int_endLoop                          ; Make sure there are actual characters to read
+   jecxz .endLoop                          ; Make sure there are actual characters to read
    mov   r8b, [rsi]                               ; Look at the first char
       ;;; If cl == '-'
    cmp   r8b, ASCII_MINUS
       ;;;; jump if cl != '-'.  That is, *invert* the IF test you want.
-   jne   str2int_Loop                             ; If no sign, pretend we didn't even look
+   jne   .Loop                             ; If no sign, pretend we didn't even look
    ;;; cl == '-'. Store the fact that we saw a '-' character.
    neg   r9d                                      ; Sign <- -1
    dec   rcx                                      ; Consumed a character
    inc   rsi
 
    ;; Main loop
-   jecxz  str2int_endLoop                         ; if CX <= 0, jump to the end of the loop
+   jecxz  .endLoop                         ; if CX <= 0, jump to the end of the loop
    ;; while R8 > 0
-   str2int_Loop:
+   .Loop:
       mul   r10d                                  ; EAX *= 10 (previous digits)
       mov   r8b, [rsi]                            ; Move one digit into R8B
       sub   r8b, ASCII_ZERO                       ; Char to numeric
       add   rax, r8                               ; Add in the current digit
       inc   rsi                                   ; Point RSI at the next digit
-      loop  str2int_Loop                          ; Jump back to the beginning of the while and do it again
-   str2int_endLoop:                               ; End the loop
+      loop  .Loop                          ; Jump back to the beginning of the while and do it again
+   .endLoop:                               ; End the loop
    imul  r9                                       ; Result *will* fit in RAX
 
    ;; Exit code (epilogue)
@@ -121,7 +121,7 @@ int2str:
 
    ;; Handle negative sign, if any
    cmp   rax, 0
-   jge   int2str_CountDigits
+   jge   .CountDigits
    neg   rax
    neg   r9                      ; Sign is now negative
    mov   byte [rdi], ASCII_MINUS 
@@ -129,25 +129,25 @@ int2str:
                                  ; Count of characters will be incremented later
 
    ;; Find number of digits
-   int2str_CountDigits:
+   .CountDigits:
       inc   rcx
       imul  r10, 10  ; Signed multiplication so product can go in R10
       cmp   rax, r10
-      jg    int2str_CountDigits
+      jg    .CountDigits
    ;; RCX now holds the number of digits in the number
    add   rdi, rcx    ; RDI = RDI + RCX - 1 (next line)
    dec   rdi         ; RDI now points to the place for the *last* digit
    mov   r10, 10     ; Divisor
    mov   rdx, 0      ; Clear out rdx before the first division
 
-   int2str_MainLoop:
+   .MainLoop:
       div   r10
       add   dl, ASCII_ZERO    ; numeric to string
       mov   [rdi], dl         ; Stow it away
       mov   rdx, 0            ; Clear it out, so the next div works
       dec   rdi               ; Back up to the previous digit
       cmp   rax, 0
-      jg    int2str_MainLoop
+      jg    .MainLoop
 
    ;; RDI now points one place before the first digit
    add   rdi, rcx             ; add the number of digits
@@ -157,9 +157,9 @@ int2str:
 
    ;; If the number was negative, increment ECX for the minus sign
    cmp   r9, 0
-   jge   int2str_NoMinus
+   jge   .NoMinus
    inc   rcx                  ; One more character for the minus sign
-   int2str_NoMinus:
+   .NoMinus:
 
    mov   rax, rcx             ; Put the return value (number of bytes) into EAX
 
@@ -194,15 +194,26 @@ ReadInt:
    ;; InputHandle: [rbp + 24]
    ;; Address of prompt: [rbp + 32]
    ;; Length of prompt: [rbp + 40]
+   %define BYTES_READ               [rbp-120]
+   %define OUT_HANDLE               [rbp+16]
+   %define IN_HANDLE                [rbp+24]
+   %define PROMPT_ADDR              [rbp+32]
+   %define PROMPT_LENGTH            [rbp+40]
+   %define FIFTH_PARAM              qword [rsp+32]
+   %macro  load_base_addr           2
+      mov   %1, rbp
+      add   %1, %2
+   %endmacro
+   %define  BYTES_WRITTEN_OFFSET    -112
+   %define  STRING_SPACE_OFFSET     -104
 
    ;; Prompt
    sub   RSP, 32 + 8 + 8                     ; Shadow space + 5th parameter + align stack
-   mov   rcx, [rbp + 16]                     ; Parameter 1: output handle
-   mov   rdx, [rbp + 32]                     ; Parameter 2: address of prompt
-   mov   r8, [rbp + 40]                      ; Parameter 3: length of prompt
-   mov   r9, rbp                             ; Parameter 4: address for bytes written
-   sub   r9, 112                             ;      which is rbp - 112
-   mov   qword [RSP + 4 * 8], NULL           ; 5th parameter
+   mov   rcx, OUT_HANDLE                     ; Parameter 1: output handle
+   mov   rdx, PROMPT_ADDR                    ; Parameter 2: address of prompt
+   mov   r8, PROMPT_LENGTH                   ; Parameter 3: length of prompt
+   load_base_addr r9, BYTES_WRITTEN_OFFSET    ; Parameter 4: address for bytes written
+   mov   FIFTH_PARAM, NULL                     ; 5th parameter
    call  WriteFile                           ; Output can be redirected to a file using >
    add   RSP, 48                             ; Remove the 48 bytes shadow space for WriteFile
 
@@ -210,22 +221,19 @@ ReadInt:
    sub   RSP, 32 + 8 + 8                     ; Shadow space + 5th parameter + align stack
                                              ; to a multiple of 16 bytes (MS x64 calling convention)
    ;; Note we have to reload parameters from scratch.  They're all in volatile registers.
-   mov   rcx, [rbp + 24]                     ; Parameter 1: input handle
-   mov   rdx, rbp                            ; Parameter 2: address of string space
-   sub   rdx, 104                            ;     which is [rbp - 104]
+   mov   rcx, IN_HANDLE                      ; Parameter 1: input handle
+   load_base_addr rdx, STRING_SPACE_OFFSET   ; Parameter 2: address of string space
    mov   r8, MAX_INPUT_LENGTH                ; Parameter 3: maximum input length
-   mov   r9, rbp                             ; Parameter 4: address of bytes read
-   sub   r9, 120                             ;     which is [rbp - 120]
-   mov   qword [RSP + 4 * 8], NULL           ; 5th parameter
+   load_base_addr r9,   -120
+   mov   FIFTH_PARAM, NULL                   ; 5th parameter
    call  ReadFile                            
    add   RSP, 48                             ; Remove the 48 bytes
 
    ;; Convert to int
    sub   rsp, 32                             ; Shadow space
    ;; Again, reload parameters from scratch.
-   mov   rcx, [rbp-120]                      ; Length of string, including CRLF
-   mov   rdx, rbp                            ; Address of string space
-   sub   rdx, 104                            ;     which is [rbp - 104]
+   mov   rcx, BYTES_READ                     ; Length of string, including CRLF
+   load_base_addr rdx, -104
    call  str2int
    add   RSP, 32                             ; Dump shadow space
    ;; Leave result in RAX
@@ -237,6 +245,10 @@ ReadInt:
    pop   rbp
    ;; Ensure that result is in RAX, then
    ret
+   ;; Undefine the function-local macros
+   %undef   BYTES_READ
+   %undef   OUT_HANDLE
+   %undef   IN_HANDLE
 
 ;; Function WriteInt
 ;; Parameters: OutputHandle, address of label, label length, number to print
@@ -319,18 +331,18 @@ polynomial_ShadowSize:
    sub   rax, 4                        ; Four parameters in registers
                                        ; RAX now has the number of parameters that will 
                                        ;     need to be passed in the shadow space
-   jns   polynomial_ParametersOver4    ; if RAX >= 0, leave it alone
+   jns   .ParametersOver4    ; if RAX >= 0, leave it alone
    mov   rax, 0                        ; else (RAX is negative), RAX <- 0
 
-   polynomial_ParametersOver4:
-   mov   r9, 8                         ; Multiplier (quadwords to bytes)
-   mul   r9                            ; RAX now has the bytes for the fifth+ parameters to polynomial_eval
+   .ParametersOver4:
+   sal   rax, 3                        ; Parameters to bytes.
+                                       ; RAX now has the bytes for the fifth+ parameters to .eval                            
    add   rax, 32                       ; Add on the basic 32 bytes
    test  rax, 15                       ; Gives zero iff EAX is a multiple of 16
-   jz    polynomial_FoundShadowSize    ; If EAX % 16 == 0, don't bother to add an extra 8
+   jz    .FoundShadowSize    ; If EAX % 16 == 0, don't bother to add an extra 8
    add   rax, 8
 
-   polynomial_FoundShadowSize:
+   .FoundShadowSize:
    ;; Exit code
    ret
 
@@ -357,15 +369,15 @@ eval_poly:
    add   r11, rsp                ; Add RSP so R11 points to aN
 
    mov   rax, [r11]
-   jrcxz AfterHorner
-   HornersLoop:
-      mul   r10
+   jrcxz .AfterHorner
+   .HornersLoop:
+      mul   r10                  ; RAX = RAX * X
       sub   r11, 8               ; Move R11 back to the next coefficient
       add   rax, [r11]           ; Add the next coefficient
-      loop  HornersLoop          ; The LOOP instruction actually decrements and
+      loop  .HornersLoop          ; The LOOP instruction actually decrements and
                                  ;    tests ECX, not RCX.  For a number as
                                  ;    small as the degree, it doesn't matter.
-   AfterHorner:
+   .AfterHorner:
    ;; Exit code: result is already in RAX. Used no non-volatile registers and
    ;; no local variables.
    ret
@@ -413,7 +425,7 @@ mov    rcx, [REL Degree]                        ; RCX <- degree
 inc    rcx                                      ; RCX <- number of coefficients
 lea    r8, [REL Coefficients]
 
-CoefficientLoop:
+.CoefficientLoop:
    push  rcx                                    ; Keep RCX safe
    push  r8                                     ; Keep the offset safe
 
@@ -430,10 +442,10 @@ CoefficientLoop:
    add   r8, 8                                  ; Bump r8 along the Coefficients array
    pop   rcx                                    ; Get RCX back
    dec   rcx
-   jrcxz CoefficientsRead
-   jmp   CoefficientLoop
+   jrcxz .CoefficientsRead
+   jmp   .CoefficientLoop
 
-CoefficientsRead:
+.CoefficientsRead:
 
 ;; How much shadow space will we need for eval_poly?
 sub   rsp, 32
@@ -449,30 +461,30 @@ sub   rsp, [REL ShadowSize]         ; Make the shadow space
 mov   rcx, [REL Degree]             ; Put degree in RCX
 dec   RCX                           ; Degree - 1 = number of coefficients on stack
 cmp   rcx, 0
-jle   CoefficientsLoaded            ; if RCX <= 0, no coefficients to load
+jle   .CoefficientsLoaded            ; if RCX <= 0, no coefficients to load
 
 lea   r10, [REL Coefficients + 16]  ; Pointer to a2
 lea   r11, [RSP + 4 * 8]            ; Pointer to the stack location for a2
 
-LoadCoefficients:
+.LoadCoefficients:
 mov   r9, [r10]                     ; Load a coefficient into a register
 mov   [r11], r9                     ; Load it onto the stack
 add   r10, 8                        ; Push the pointers along
 add   r11, 8
-loop  LoadCoefficients
+loop  .LoadCoefficients
 
-CoefficientsLoaded:
+.CoefficientsLoaded:
 ;; Load the first 4 parameters
 mov   rcx, [REL X]
 mov   rdx, [REL Degree]
 mov   r8, [REL Coefficients]        ; a0
 cmp   rdx, 0
-je    BlankA1                       ; if degree > 0, load a1
+je    .BlankA1                       ; if degree > 0, load a1
 mov   r9, [REL Coefficients + 8]    ; a1
-jmp   ParametersLoaded
-BlankA1:                            ; else (degree == 0), let a1 == 0
+jmp   .ParametersLoaded
+.BlankA1:                            ; else (degree == 0), let a1 == 0
 mov   r9, 0                         ; a1
-ParametersLoaded:
+.ParametersLoaded:
 
 call  eval_poly
 mov   [REL Fx], rax
