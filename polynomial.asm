@@ -213,6 +213,7 @@ ReadInt:
    mov   rdx, PROMPT_ADDR                    ; Parameter 2: address of prompt
    mov   r8, PROMPT_LENGTH                   ; Parameter 3: length of prompt
    load_base_addr r9, BYTES_WRITTEN_OFFSET    ; Parameter 4: address for bytes written
+   ;lea   r9, [ebp+BYTES_WRITTEN_OFFSET]
    mov   FIFTH_PARAM, NULL                     ; 5th parameter
    call  WriteFile                           ; Output can be redirected to a file using >
    add   RSP, 48                             ; Remove the 48 bytes shadow space for WriteFile
@@ -223,8 +224,10 @@ ReadInt:
    ;; Note we have to reload parameters from scratch.  They're all in volatile registers.
    mov   rcx, IN_HANDLE                      ; Parameter 1: input handle
    load_base_addr rdx, STRING_SPACE_OFFSET   ; Parameter 2: address of string space
+   ;lea   rdx, [ebp+STRING_SPACE_OFFSET]
    mov   r8, MAX_INPUT_LENGTH                ; Parameter 3: maximum input length
    load_base_addr r9,   -120
+   ;lea   r9, [ebp-120]
    mov   FIFTH_PARAM, NULL                   ; 5th parameter
    call  ReadFile                            
    add   RSP, 48                             ; Remove the 48 bytes
@@ -234,6 +237,7 @@ ReadInt:
    ;; Again, reload parameters from scratch.
    mov   rcx, BYTES_READ                     ; Length of string, including CRLF
    load_base_addr rdx, -104
+   ;lea   rdx, [ebp-104]
    call  str2int
    add   RSP, 32                             ; Dump shadow space
    ;; Leave result in RAX
@@ -280,8 +284,8 @@ WriteInt:
    mov   rcx, [rbp + 16]                     ; Parameter 1: output handle
    mov   rdx, [rbp + 24]                     ; Parameter 2: address of label
    mov   r8, [rbp + 32]                      ; Parameter 3: length of label
-   mov   r9, rbp                             ; Parameter 4: address for bytes written
-   sub   r9, 112                             ;      which is rbp - 112
+   lea   r9, [rbp - 112]                         ; Parameter 4: address for bytes written
+   ;sub   r9, 112                             ;      which is rbp - 112
    mov   qword [RSP + 4 * 8], NULL           ; 5th parameter
    call  WriteFile                           ; Output can be redirected to a file using >
    add   RSP, 48                             ; Remove the 48 bytes shadow space for WriteFile
@@ -289,8 +293,8 @@ WriteInt:
    ;; Convert number to string
    sub   rsp, 32                             ; Shadow space
    mov   rcx, [rbp + 40]                     ; Parameter 1: number
-   mov   rdx, rbp                            ; Parameter 2: address of string space
-   sub   rdx, 104                            ;       which is rbp - 104
+   lea   rdx, [rbp - 104]                           ; Parameter 2: address of string space
+   ;sub   rdx, 104                            ;       which is rbp - 104
    call  int2str
    mov   [rbp - 112], rax                    ; Store the length of the string
    add   rsp, 32                             ; Dump the shadow space
@@ -300,11 +304,11 @@ WriteInt:
    sub   RSP, 32 + 8 + 8                     ; Shadow space + 5th parameter + align stack
                                              ; to a multiple of 16 bytes (MS x64 calling convention)
    mov   rcx, [rbp + 16]                     ; Parameter 1: output handle
-   mov   rdx, rbp                            ; Parameter 2: address of the number string
-   sub   rdx, 104                            ;        which is rbp - 104
+   lea   rdx, [rbp - 104]                           ; Parameter 2: address of the number string
+   ;sub   rdx, 104                            ;        which is rbp - 104
    mov   r8, [rbp - 112]                     ; Parameter 3: length of the string
-   mov   r9, rbp                             ; Parameter 4: address for bytes written
-   sub   r9, 112                             ;        which is rbp - 112
+   lea   r9, [rbp - 112]                            ; Parameter 4: address for bytes written
+   ;sub   r9, 112                             ;        which is rbp - 112
    mov   qword [RSP + 4 * 8], NULL           ; 5th parameter
    call  WriteFile                           ; Output can be redirected to a file using >
    add   RSP, 48                             ; Remove the 48 bytes shadow space for WriteFile
