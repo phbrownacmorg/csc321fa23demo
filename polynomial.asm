@@ -7,6 +7,11 @@ ASCII_ZERO          EQU 48
 ASCII_MINUS         EQU 45
 MAX_DEGREE          EQU 6
 
+;; Gloabl macros
+%define FIFTH_PARAM              qword [rsp+32]
+
+
+
 extern GetStdHandle                             ; Import external symbols
 extern ReadFile
 extern WriteFile                                ; Windows API functions, not decorated
@@ -199,7 +204,6 @@ ReadInt:
    %define IN_HANDLE                [rbp+24]
    %define PROMPT_ADDR              [rbp+32]
    %define PROMPT_LENGTH            [rbp+40]
-   %define FIFTH_PARAM              qword [rsp+32]
    %macro  load_base_addr           2
       mov   %1, rbp
       add   %1, %2
@@ -213,7 +217,7 @@ ReadInt:
    mov   rdx, PROMPT_ADDR                    ; Parameter 2: address of prompt
    mov   r8, PROMPT_LENGTH                   ; Parameter 3: length of prompt
    load_base_addr r9, BYTES_WRITTEN_OFFSET    ; Parameter 4: address for bytes written
-   ;lea   r9, [ebp+BYTES_WRITTEN_OFFSET]
+   ;lea   r9, [ebp + BYTES_WRITTEN_OFFSET]
    mov   FIFTH_PARAM, NULL                     ; 5th parameter
    call  WriteFile                           ; Output can be redirected to a file using >
    add   RSP, 48                             ; Remove the 48 bytes shadow space for WriteFile
