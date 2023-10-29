@@ -7,10 +7,22 @@ ASCII_ZERO          EQU 48
 ASCII_MINUS         EQU 45
 MAX_DEGREE          EQU 6
 
-;; Gloabl macros
-%define FIFTH_PARAM              qword [rsp+32]
+;; Global macros
+;;; Straight-up single-line macro
+;;;; Fifth parameter
+%define FIFTH_PARAM  qword [rsp+32]    
 
+;;; Single-line macros can take parameters, as follows:
+; Address in stack frame (relative to RBP)
+%define BASE(a)      [rbp+(a)]        
 
+;; Copy parameters into shadow space
+%macro ParamsToShadow   0
+   mov   [rsp+8], rcx  ; Parameter 1
+   mov   [rsp+16], rdx ; Parameter 2
+   mov   [rsp+24], r8  ; Parameter 3
+   mov   [rsp+32], r9  ; Parameter 4
+%endmacro
 
 extern GetStdHandle                             ; Import external symbols
 extern ReadFile
@@ -179,46 +191,30 @@ int2str:
 ;; Returns integer read in EAX
 ReadInt:
    ;; Entry code (preamble)
-   ;; Copy parameters into shadow space
-   mov   [rsp+8], rcx  ; Parameter 1 (output handle)
-   mov   [rsp+16], rdx ; Parameter 2 (input handle)
-   mov   [rsp+24], r8  ; Parameter 3 (address of prompt)
-   mov   [rsp+32], r9  ; Parameter 4 (length of prompt)
+   ParamsToShadow
    ;; Push non-volatile registers
    push  rbp
    mov   rbp, rsp      ; Establish base pointer 
    ;; Make space for local parameters on the stack
    sub   rsp, 8 * ((MAX_INPUT_LENGTH + 2) + 2 + 1)
    ;; Variable addresses
-   ;; BytesRead: [rbp - 120]
-   ;; BytesWritten: [rbp - 112]
-   ;; StringSpace: [rbp - 104]
+   %define BYTES_READ               BASE(-120)
+   %define BYTES_WRITTEN            BASE(-112)
+   %define STRING_SPACE             BASE(-104)
    ;; (old RBP): [rbp]
    ;; (return address): [rbp + 8]
-   ;; OutputHandle: [rbp + 16]
-   ;; InputHandle: [rbp + 24]
-   ;; Address of prompt: [rbp + 32]
-   ;; Length of prompt: [rbp + 40]
-   %define BYTES_READ               [rbp-120]
-   %define OUT_HANDLE               [rbp+16]
-   %define IN_HANDLE                [rbp+24]
-   %define PROMPT_ADDR              [rbp+32]
-   %define PROMPT_LENGTH            [rbp+40]
-   %macro  load_base_addr           2
-      mov   %1, rbp
-      add   %1, %2
-   %endmacro
-   %define  BYTES_WRITTEN_OFFSET    -112
-   %define  STRING_SPACE_OFFSET     -104
+   %define OUT_HANDLE               BASE(16)
+   %define IN_HANDLE                BASE(24)
+   %define PROMPT_ADDR              BASE(32)
+   %define PROMPT_LENGTH            BASE(40)
 
    ;; Prompt
    sub   RSP, 32 + 8 + 8                     ; Shadow space + 5th parameter + align stack
    mov   rcx, OUT_HANDLE                     ; Parameter 1: output handle
    mov   rdx, PROMPT_ADDR                    ; Parameter 2: address of prompt
    mov   r8, PROMPT_LENGTH                   ; Parameter 3: length of prompt
-   load_base_addr r9, BYTES_WRITTEN_OFFSET    ; Parameter 4: address for bytes written
-   ;lea   r9, [ebp + BYTES_WRITTEN_OFFSET]
-   mov   FIFTH_PARAM, NULL                     ; 5th parameter
+   lea   r9, BYTES_WRITTEN                   ; Parameter 4: address for bytes written
+   mov   FIFTH_PARAM, NULL                   
    call  WriteFile                           ; Output can be redirected to a file using >
    add   RSP, 48                             ; Remove the 48 bytes shadow space for WriteFile
 
@@ -227,12 +223,10 @@ ReadInt:
                                              ; to a multiple of 16 bytes (MS x64 calling convention)
    ;; Note we have to reload parameters from scratch.  They're all in volatile registers.
    mov   rcx, IN_HANDLE                      ; Parameter 1: input handle
-   load_base_addr rdx, STRING_SPACE_OFFSET   ; Parameter 2: address of string space
-   ;lea   rdx, [ebp+STRING_SPACE_OFFSET]
+   lea   rdx, STRING_SPACE
    mov   r8, MAX_INPUT_LENGTH                ; Parameter 3: maximum input length
-   load_base_addr r9,   -120
-   ;lea   r9, [ebp-120]
-   mov   FIFTH_PARAM, NULL                   ; 5th parameter
+   lea   r9, BYTES_READ
+   mov   FIFTH_PARAM, NULL                   
    call  ReadFile                            
    add   RSP, 48                             ; Remove the 48 bytes
 
@@ -240,8 +234,7 @@ ReadInt:
    sub   rsp, 32                             ; Shadow space
    ;; Again, reload parameters from scratch.
    mov   rcx, BYTES_READ                     ; Length of string, including CRLF
-   load_base_addr rdx, -104
-   ;lea   rdx, [ebp-104]
+   lea   rdx, STRING_SPACE
    call  str2int
    add   RSP, 32                             ; Dump shadow space
    ;; Leave result in RAX
@@ -255,65 +248,61 @@ ReadInt:
    ret
    ;; Undefine the function-local macros
    %undef   BYTES_READ
+   %undef   BYTES_WRITTEN
+   %undef   STRING_SPACE
    %undef   OUT_HANDLE
    %undef   IN_HANDLE
+   %undef   PROMPT_ADDR
+   %undef   PROMPT_LENGTH
 
 ;; Function WriteInt
 ;; Parameters: OutputHandle, address of label, label length, number to print
 ;; Returns number of characters printed when printing the number (i.e., digits+2)
 WriteInt:
       ;; Entry code (preamble)
-   ;; Copy parameters into shadow space
-   mov   [rsp+8], rcx  ; Parameter 1 (output handle)
-   mov   [rsp+16], rdx ; Parameter 2 (address of label)
-   mov   [rsp+24], r8  ; Parameter 3 (length of label)
-   mov   [rsp+32], r9  ; Parameter 4 (number to print)
+   ParamsToShadow
    ;; Push non-volatile registers
    push  rbp
    mov   rbp, rsp      ; Establish base pointer 
    ;; Make space for local parameters on the stack
    sub   rsp, 8 * ((MAX_INPUT_LENGTH + 2) + 1)
    ;; Variable addresses
-   ;; ByteCount: [rbp - 112]
-   ;; StringSpace: [rbp - 104]
+   %define BYTE_COUNT   BASE(-112)
+   %define STRING_SPACE BASE(-104)
    ;; (old RBP): [rbp]
    ;; (return address): [rbp + 8]
-   ;; OutputHandle: [rbp + 16]
-   ;; Label address: [rbp + 24]
-   ;; Label length: [rbp + 32]
-   ;; Number to print: [rbp + 40]
+   %define OUT_HANDLE   BASE(16)
+   %define LABEL_ADDR   BASE(24)
+   %define LABEL_LENGTH BASE(32)
+   %define INT_TO_PRINT BASE(40)
 
    ;; Print label
    sub   RSP, 32 + 8 + 8                     ; Shadow space + 5th parameter + align stack
-   mov   rcx, [rbp + 16]                     ; Parameter 1: output handle
-   mov   rdx, [rbp + 24]                     ; Parameter 2: address of label
-   mov   r8, [rbp + 32]                      ; Parameter 3: length of label
-   lea   r9, [rbp - 112]                         ; Parameter 4: address for bytes written
-   ;sub   r9, 112                             ;      which is rbp - 112
-   mov   qword [RSP + 4 * 8], NULL           ; 5th parameter
+   mov   rcx, OUT_HANDLE                     ; Parameter 1: output handle
+   mov   rdx, LABEL_ADDR                     ; Parameter 2: address of label
+   mov   r8, LABEL_LENGTH                      ; Parameter 3: length of label
+   lea   r9, BYTE_COUNT                       ; Parameter 4: address for bytes written
+   mov   qword FIFTH_PARAM, NULL
    call  WriteFile                           ; Output can be redirected to a file using >
    add   RSP, 48                             ; Remove the 48 bytes shadow space for WriteFile
 
    ;; Convert number to string
    sub   rsp, 32                             ; Shadow space
-   mov   rcx, [rbp + 40]                     ; Parameter 1: number
-   lea   rdx, [rbp - 104]                           ; Parameter 2: address of string space
-   ;sub   rdx, 104                            ;       which is rbp - 104
+   mov   rcx, INT_TO_PRINT                   ; Parameter 1: number
+   lea   rdx, STRING_SPACE                   ; Parameter 2: address of string space
    call  int2str
-   mov   [rbp - 112], rax                    ; Store the length of the string
+   mov   BYTE_COUNT, rax                     ; Store the length of the string
    add   rsp, 32                             ; Dump the shadow space
    
    ;; Print number
 
    sub   RSP, 32 + 8 + 8                     ; Shadow space + 5th parameter + align stack
                                              ; to a multiple of 16 bytes (MS x64 calling convention)
-   mov   rcx, [rbp + 16]                     ; Parameter 1: output handle
-   lea   rdx, [rbp - 104]                           ; Parameter 2: address of the number string
-   ;sub   rdx, 104                            ;        which is rbp - 104
-   mov   r8, [rbp - 112]                     ; Parameter 3: length of the string
-   lea   r9, [rbp - 112]                            ; Parameter 4: address for bytes written
-   ;sub   r9, 112                             ;        which is rbp - 112
-   mov   qword [RSP + 4 * 8], NULL           ; 5th parameter
+   mov   rcx, OUT_HANDLE                     ; Parameter 1: output handle
+   lea   rdx, STRING_SPACE                   ; Parameter 2: address of the number string
+   mov   r8, BYTE_COUNT                      ; Parameter 3: length of the string
+   lea   r9, BYTE_COUNT                      ; Parameter 4: address for bytes written
+   mov   FIFTH_PARAM, NULL
    call  WriteFile                           ; Output can be redirected to a file using >
    add   RSP, 48                             ; Remove the 48 bytes shadow space for WriteFile
 
@@ -323,6 +312,13 @@ WriteInt:
    ;; Pop non-volatile register
    pop   rbp
    ret
+   ;; Undefine the function-local macros
+   %undef   BYTE_COUNT
+   %undef   STRING_SPACE
+   %undef   OUT_HANDLE
+   %undef   LABEL_ADDR
+   %undef   LABEL_LENGTH
+   %undef   INT_TO_PRINT
 
 ;; Function polynomial_shadow_size
 ;; One parameter: the degree of the polynomial
@@ -360,11 +356,7 @@ polynomial_ShadowSize:
 ;; The result of the evaluation is returned in RAX.
 eval_poly:
    ;; Entry code (preamble)
-   ;; Copy parameters into shadow space
-   mov   [rsp+8], rcx            ; Parameter 1 (X)
-   mov   [rsp+16], rdx           ; Parameter 2 (degree)
-   mov   [rsp+24], r8            ; Parameter 3 (a0)
-   mov   [rsp+32], r9            ; Parameter 4 (a1)
+   ParamsToShadow
 
    ;; Body code
    mov   r10, rcx                ; r10 <- X
@@ -382,7 +374,7 @@ eval_poly:
       mul   r10                  ; RAX = RAX * X
       sub   r11, 8               ; Move R11 back to the next coefficient
       add   rax, [r11]           ; Add the next coefficient
-      loop  .HornersLoop          ; The LOOP instruction actually decrements and
+      loop  .HornersLoop         ; The LOOP instruction actually decrements and
                                  ;    tests ECX, not RCX.  For a number as
                                  ;    small as the degree, it doesn't matter.
    .AfterHorner:
