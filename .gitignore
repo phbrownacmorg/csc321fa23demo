@@ -16,3 +16,5 @@ hello_wb.asm
 add2-expt.asm
 add2-proc.asm
 tries/**
+
+cpu_scheduler_simulator/**
