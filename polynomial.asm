@@ -79,26 +79,26 @@ str2int: ;; Beginning of function is just a label
    mov   rsi, rdx                                 ; Beginning of the string
    sub   rcx, 2                                   ; Subtract 2 to exclude the CR/LF at the end
    mov   r8, 0                                    ; clear R8
-   mov   r9d, 1                                   ; Sign
+   mov   r9, 1                                    ; Sign
    mov   r10, 10                                  ; Base 10; value in R10 to allow multiplying
 
    ;; Handle the sign character (if any)                         
-   jecxz .endLoop                          ; Make sure there are actual characters to read
+   jrcxz .endLoop                          ; Make sure there are actual characters to read
    mov   r8b, [rsi]                               ; Look at the first char
       ;;; If cl == '-'
    cmp   r8b, ASCII_MINUS
       ;;;; jump if cl != '-'.  That is, *invert* the IF test you want.
    jne   .Loop                             ; If no sign, pretend we didn't even look
    ;;; cl == '-'. Store the fact that we saw a '-' character.
-   neg   r9d                                      ; Sign <- -1
+   neg   r9                                       ; Sign <- -1
    dec   rcx                                      ; Consumed a character
    inc   rsi
 
    ;; Main loop
-   jecxz  .endLoop                         ; if CX <= 0, jump to the end of the loop
+   jrcxz  .endLoop                         ; if CX <= 0, jump to the end of the loop
    ;; while R8 > 0
    .Loop:
-      mul   r10d                                  ; EAX *= 10 (previous digits)
+      imul  r10                                   ; RAX *= 10 (previous digits)
       mov   r8b, [rsi]                            ; Move one digit into R8B
       sub   r8b, ASCII_ZERO                       ; Char to numeric
       add   rax, r8                               ; Add in the current digit
@@ -115,7 +115,7 @@ str2int: ;; Beginning of function is just a label
 
 ;;;; Function int2str
 ;;;; Takes an int and the address of a string
-;;;; Returns the number of bytes in the converted string in EAX
+;;;; Returns the number of bytes in the converted string in RAX
 ;;;; Handles negative outputs
 ;;;; This is the non-paranoid version.
 int2str:
@@ -158,7 +158,7 @@ int2str:
    mov   rdx, 0      ; Clear out rdx before the first division
 
    .MainLoop:
-      div   r10
+      idiv  r10
       add   dl, ASCII_ZERO    ; numeric to string
       mov   [rdi], dl         ; Stow it away
       mov   rdx, 0            ; Clear it out, so the next div works
@@ -178,7 +178,7 @@ int2str:
    inc   rcx                  ; One more character for the minus sign
    .NoMinus:
 
-   mov   rax, rcx             ; Put the return value (number of bytes) into EAX
+   mov   rax, rcx             ; Put the return value (number of bytes) into RAX
 
    ;; Exit code (epilogue)
    ;; Restore other registers
@@ -188,7 +188,7 @@ int2str:
 
 ;; Function ReadInt
 ;; Parameters: OutputHandle, InputHandle, address of prompt, and prompt length
-;; Returns integer read in EAX
+;; Returns integer read in RAX
 ReadInt:
    ;; Entry code (preamble)
    ParamsToShadow
@@ -342,8 +342,8 @@ polynomial_ShadowSize:
    sal   rax, 3                        ; Parameters to bytes.
                                        ; RAX now has the bytes for the fifth+ parameters to .eval                            
    add   rax, 32                       ; Add on the basic 32 bytes
-   test  rax, 15                       ; Gives zero iff EAX is a multiple of 16
-   jz    .FoundShadowSize    ; If EAX % 16 == 0, don't bother to add an extra 8
+   test  rax, 15                       ; Gives zero iff RAX is a multiple of 16
+   jz    .FoundShadowSize    ; If RAX % 16 == 0, don't bother to add an extra 8
    add   rax, 8
 
    .FoundShadowSize:
@@ -371,7 +371,7 @@ eval_poly:
    mov   rax, [r11]
    jrcxz .AfterHorner
    .HornersLoop:
-      mul   r10                  ; RAX = RAX * X
+      imul  r10                  ; RAX = RAX * X
       sub   r11, 8               ; Move R11 back to the next coefficient
       add   rax, [r11]           ; Add the next coefficient
       loop  .HornersLoop         ; The LOOP instruction actually decrements and
